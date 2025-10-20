@@ -166,6 +166,44 @@ class AboutDialog(QDialog):
         self.setLayout(layout)
 
 
+class ProportionalHeaderView(QHeaderView):
+    """Custom header view that maintains proportional column widths"""
+
+    def __init__(self, orientation, parent=None):
+        super().__init__(orientation, parent)
+        self._proportions = []
+        self._initial_widths_set = False
+
+    def setProportionalWidths(self, widths):
+        """Set the proportional widths for columns"""
+        total = sum(widths)
+        self._proportions = [w / total for w in widths]
+        self._initial_widths_set = True
+        self._updateColumnWidths()
+
+    def _updateColumnWidths(self):
+        """Update column widths based on current table width and proportions"""
+        if not self._proportions or not self._initial_widths_set:
+            return
+
+        # Get available width (subtract margins and scrollbar)
+        available_width = self.parent().width() - 50
+        if available_width <= 0:
+            return
+
+        # Calculate new widths based on proportions
+        for i, proportion in enumerate(self._proportions):
+            new_width = int(available_width * proportion)
+            if i < self.count():
+                self.resizeSection(i, max(new_width, 50))  # Minimum width of 50px
+
+    def resizeEvent(self, event):
+        """Handle resize events to maintain proportions"""
+        super().resizeEvent(event)
+        if self._initial_widths_set:
+            QTimer.singleShot(10, self._updateColumnWidths)  # Small delay for smooth resizing
+
+
 class CamRenamerMainWindow(QMainWindow):
     """Main window of the application"""
 
@@ -174,7 +212,7 @@ class CamRenamerMainWindow(QMainWindow):
         self.cameras: List[CameraDevice] = []
         self.scanner_thread: Optional[CameraScanner] = None
 
-        self.setWindowTitle("CamRenamer - USB Camera Manager v1.0")
+        self.setWindowTitle("CamRenamer - USB Camera Manager v1.1")
         self.setMinimumSize(950, 650)
         self.resize(1150, 750)
 
@@ -460,17 +498,16 @@ class CamRenamerMainWindow(QMainWindow):
             "🎥 Camera Name", "🔧 Device ID", "💾 Hardware ID", "🔌 Status", "⚙️ Actions"
         ])
 
-        # Table styling and behavior
-        header = self.camera_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        # Use custom proportional header view
+        proportional_header = ProportionalHeaderView(Qt.Orientation.Horizontal, self.camera_table)
+        self.camera_table.setHorizontalHeader(proportional_header)
 
-        # Enable column moving and drag & drop
-        header.setSectionsMovable(True)
-        header.setDragDropMode(QHeaderView.DragDropMode.InternalMove)
+        # Set proportional widths: Camera Name(20%), Device ID(30%), Hardware ID(25%), Status(12%), Actions(13%)
+        proportional_header.setProportionalWidths([200, 300, 250, 120, 130])
+
+        # Disable column moving but allow manual resizing
+        proportional_header.setSectionsMovable(False)
+        proportional_header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
 
         # Table behavior settings
         self.camera_table.setAlternatingRowColors(True)
@@ -507,7 +544,7 @@ class CamRenamerMainWindow(QMainWindow):
         rename_layout.addLayout(rename_form_layout)
 
         # Hint label
-        hint_label = QLabel("💡 Tip: Select a camera from the table and enter a new name. You can move columns by dragging the headers.")
+        hint_label = QLabel("💡 Tip: Select a camera from the table and enter a new name. Column widths adjust proportionally when resizing the window.")
         hint_label.setStyleSheet("color: #aaaaaa; font-size: 11px; font-style: italic;")
         hint_label.setWordWrap(True)
         rename_layout.addWidget(hint_label)
@@ -516,6 +553,18 @@ class CamRenamerMainWindow(QMainWindow):
 
         # Table selection event
         self.camera_table.itemSelectionChanged.connect(self.on_camera_selection_changed)
+
+    def resizeEvent(self, event):
+        """Handle window resize events to update table column proportions"""
+        super().resizeEvent(event)
+        # Trigger proportional resize with a small delay
+        QTimer.singleShot(50, self._updateTableColumnWidths)
+
+    def _updateTableColumnWidths(self):
+        """Update table column widths proportionally"""
+        header = self.camera_table.horizontalHeader()
+        if hasattr(header, '_updateColumnWidths'):
+            header._updateColumnWidths()
 
     def clear_table(self):
         """Clears the camera table"""
