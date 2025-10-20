@@ -17,7 +17,7 @@ from PySide6.QtGui import QFont, QColor, QPixmap, QPainter, QAction
 
 @dataclass
 class CameraDevice:
-    """Datenklasse für USB-Kamera-Informationen"""
+    """Data class for USB camera information"""
     name: str
     device_id: str
     registry_path: str
@@ -27,18 +27,18 @@ class CameraDevice:
 
 
 class CameraScanner(QThread):
-    """Thread für das Scannen von USB-Kameras"""
+    """Thread for scanning USB cameras"""
     cameras_found = Signal(list)
     progress_updated = Signal(int)
     status_updated = Signal(str)
 
     def run(self):
-        """Scannt nach angeschlossenen USB-Kameras"""
+        """Scans for connected USB cameras"""
         try:
-            self.status_updated.emit("Scanne nach USB-Kameras...")
+            self.status_updated.emit("Scanning for USB cameras...")
             cameras = []
 
-            # PowerShell-Befehl für Kamera-Erkennung mit UTF-8 Output
+            # PowerShell command for camera detection with UTF-8 output
             powershell_cmd = """
             [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
             Get-PnpDevice | Where-Object {
@@ -52,7 +52,7 @@ class CameraScanner(QThread):
 
             self.progress_updated.emit(25)
 
-            # PowerShell ausführen mit expliziter UTF-8 Encoding
+            # Execute PowerShell with explicit UTF-8 encoding
             result = subprocess.run(
                 ["powershell", "-ExecutionPolicy", "Bypass", "-Command", powershell_cmd],
                 capture_output=True,
@@ -74,12 +74,12 @@ class CameraScanner(QThread):
 
                     for device in devices_data:
                         if device and isinstance(device, dict):
-                            friendly_name = device.get('FriendlyName', 'Unbekannt')
+                            friendly_name = device.get('FriendlyName', 'Unknown')
                             instance_id = device.get('InstanceId', '')
                             hardware_id = device.get('HardwareID', [''])[0] if device.get('HardwareID') else ''
                             status = device.get('Status', 'Unknown')
 
-                            # Registry-Pfad konstruieren
+                            # Construct registry path
                             registry_path = f"SYSTEM\\CurrentControlSet\\Enum\\{instance_id}"
 
                             camera = CameraDevice(
@@ -93,38 +93,38 @@ class CameraScanner(QThread):
                             cameras.append(camera)
 
                     self.progress_updated.emit(100)
-                    self.status_updated.emit(f"{len(cameras)} Kamera(s) gefunden")
+                    self.status_updated.emit(f"{len(cameras)} camera(s) found")
 
                 except json.JSONDecodeError as e:
-                    self.status_updated.emit(f"Fehler beim Parsen der Kamera-Daten: {str(e)}")
+                    self.status_updated.emit(f"Error parsing camera data: {str(e)}")
             else:
                 if result.stderr:
-                    self.status_updated.emit(f"PowerShell Fehler: {result.stderr}")
+                    self.status_updated.emit(f"PowerShell error: {result.stderr}")
                 else:
-                    self.status_updated.emit("Keine Kameras gefunden")
+                    self.status_updated.emit("No cameras found")
 
             self.cameras_found.emit(cameras)
 
         except subprocess.TimeoutExpired:
-            self.status_updated.emit("Timeout beim Scannen der Kameras")
+            self.status_updated.emit("Timeout while scanning cameras")
             self.cameras_found.emit([])
         except Exception as e:
-            self.status_updated.emit(f"Fehler beim Scannen: {str(e)}")
+            self.status_updated.emit(f"Error while scanning: {str(e)}")
             self.cameras_found.emit([])
 
 
 class AboutDialog(QDialog):
-    """Über-Dialog"""
+    """About dialog"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Über CamRenamer")
+        self.setWindowTitle("About CamRenamer")
         self.setFixedSize(450, 350)
         self.setModal(True)
 
         layout = QVBoxLayout()
 
-        # Titel
+        # Title
         title = QLabel("CamRenamer")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setFont(QFont("Arial", 20, QFont.Weight.Bold))
@@ -137,24 +137,23 @@ class AboutDialog(QDialog):
         layout.addWidget(version)
 
         # Author
-        author = QLabel("© 2024 Retroverse - Erwin Spitaler")
+        author = QLabel("© 2025 OE7SET - Erwin Spitaler")
         author.setAlignment(Qt.AlignmentFlag.AlignCenter)
         author.setFont(QFont("Arial", 10))
         layout.addWidget(author)
 
-        # Beschreibung
+        # Description
         desc = QTextEdit()
         desc.setReadOnly(True)
         desc.setMaximumHeight(180)
         desc.setPlainText(
-            "CamRenamer ermöglicht es, USB-Kameras zu verwalten und deren Namen "
-            "in der Windows-Registry zu ändern. Dies ist besonders nützlich für "
-            "Streaming-Anwendungen wie OBS, wo eindeutige Kamera-Namen erforderlich sind.\n\n"
-            "Funktionen:\n"
-            "• Automatisches Erkennen von USB-Kameras\n"
-            "• Umbenennen von Kameras in der Registry\n"
-            "• Modernes Dark Theme Design\n"
-            "• PowerShell und Registry Integration"
+            "CamRenamer allows you to manage USB cameras and change their names "
+            "in the Windows Registry. This is especially useful for "
+            "streaming applications like OBS, where unique camera names are required.\n\n"
+            "Features:\n"
+            "• Automatic detection of USB cameras\n"
+            "• Rename cameras in the Registry\n"
+            "• PowerShell and Registry integration"
         )
         layout.addWidget(desc)
 
@@ -168,34 +167,34 @@ class AboutDialog(QDialog):
 
 
 class CamRenamerMainWindow(QMainWindow):
-    """Hauptfenster der Anwendung"""
+    """Main window of the application"""
 
     def __init__(self):
         super().__init__()
         self.cameras: List[CameraDevice] = []
         self.scanner_thread: Optional[CameraScanner] = None
 
-        self.setWindowTitle("CamRenamer - USB Kamera Manager v1.1")
+        self.setWindowTitle("CamRenamer - USB Camera Manager v1.0")
         self.setMinimumSize(950, 650)
         self.resize(1150, 750)
 
-        # Modernes Design anwenden
+        # Apply modern design
         self.apply_modern_style()
 
-        # UI komponenten erstellen
+        # Create UI components
         self.setup_ui()
 
-        # Menu und Toolbar erstellen
+        # Create menu and toolbar
         self.setup_menu_and_toolbar()
 
-        # Enter-Taste für Umbenennung aktivieren
+        # Enable Enter key for renaming
         self.new_name_edit.returnPressed.connect(self.rename_selected_camera)
 
-        # Initial scan nach kurzer Verzögerung
+        # Initial scan after short delay
         QTimer.singleShot(500, self.scan_cameras)
 
     def apply_modern_style(self):
-        """Wendet ein modernes Dark Theme an"""
+        """Applies a modern dark theme"""
         self.setStyleSheet("""
             QMainWindow {
                 background-color: #2b2b2b;
@@ -229,6 +228,10 @@ class CamRenamerMainWindow(QMainWindow):
                 border-right: 1px solid #555555;
                 font-weight: bold;
                 font-size: 11px;
+            }
+
+            QHeaderView::section:hover {
+                background-color: #4a90e2;
             }
 
             QPushButton {
@@ -364,47 +367,47 @@ class CamRenamerMainWindow(QMainWindow):
         """)
 
     def setup_menu_and_toolbar(self):
-        """Erstellt Menü und Toolbar"""
-        # Menübar
+        """Creates menu and toolbar"""
+        # Menu bar
         menubar = self.menuBar()
 
-        # Datei Menü
-        file_menu = menubar.addMenu("&Datei")
+        # File Menu
+        file_menu = menubar.addMenu("&File")
 
-        refresh_action = QAction("🔄 &Aktualisieren", self)
+        refresh_action = QAction("🔄 &Refresh", self)
         refresh_action.setShortcut("F5")
-        refresh_action.setStatusTip("Kamera-Liste neu laden")
+        refresh_action.setStatusTip("Reload camera list")
         refresh_action.triggered.connect(self.scan_cameras)
         file_menu.addAction(refresh_action)
 
         file_menu.addSeparator()
 
-        exit_action = QAction("❌ &Beenden", self)
+        exit_action = QAction("❌ &Exit", self)
         exit_action.setShortcut("Ctrl+Q")
-        exit_action.setStatusTip("Anwendung beenden")
+        exit_action.setStatusTip("Exit application")
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
-        # Extras Menü
-        tools_menu = menubar.addMenu("&Extras")
+        # Tools Menu
+        tools_menu = menubar.addMenu("&Tools")
 
-        clear_action = QAction("🧹 Tabelle &leeren", self)
+        clear_action = QAction("🧹 &Clear table", self)
         clear_action.setShortcut("Ctrl+L")
-        clear_action.setStatusTip("Kamera-Tabelle leeren")
+        clear_action.setStatusTip("Clear camera table")
         clear_action.triggered.connect(self.clear_table)
         tools_menu.addAction(clear_action)
 
-        # Hilfe Menü
-        help_menu = menubar.addMenu("&Hilfe")
+        # Help Menu
+        help_menu = menubar.addMenu("&Help")
 
-        about_action = QAction("ℹ️ &Über", self)
+        about_action = QAction("ℹ️ &About", self)
         about_action.setShortcut("F1")
-        about_action.setStatusTip("Über diese Anwendung")
+        about_action.setStatusTip("About this application")
         about_action.triggered.connect(self.show_about)
         help_menu.addAction(about_action)
 
         # Toolbar
-        toolbar = QToolBar("Haupt-Toolbar")
+        toolbar = QToolBar("Main Toolbar")
         self.addToolBar(toolbar)
 
         toolbar.addAction(refresh_action)
@@ -414,10 +417,10 @@ class CamRenamerMainWindow(QMainWindow):
         toolbar.addAction(about_action)
 
         # Status Bar
-        self.statusBar().showMessage("Bereit - Drücken Sie F5 zum Aktualisieren")
+        self.statusBar().showMessage("Ready - Press F5 to refresh")
 
     def setup_ui(self):
-        """Erstellt die Benutzeroberfläche"""
+        """Creates the user interface"""
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
 
@@ -428,13 +431,13 @@ class CamRenamerMainWindow(QMainWindow):
         # Header
         header_layout = QHBoxLayout()
 
-        title_label = QLabel("🎥 USB Kamera Manager")
+        title_label = QLabel("🎥 USB Camera Manager")
         title_label.setFont(QFont("Arial", 20, QFont.Weight.Bold))
         header_layout.addWidget(title_label)
 
         header_layout.addStretch()
 
-        self.scan_button = QPushButton("🔄 Kameras scannen")
+        self.scan_button = QPushButton("🔄 Scan cameras")
         self.scan_button.clicked.connect(self.scan_cameras)
         self.scan_button.setMinimumHeight(40)
         header_layout.addWidget(self.scan_button)
@@ -447,17 +450,17 @@ class CamRenamerMainWindow(QMainWindow):
         self.progress_bar.setMinimumHeight(25)
         main_layout.addWidget(self.progress_bar)
 
-        # Kamera Tabelle
-        camera_group = QGroupBox("📋 Gefundene USB Kameras")
+        # Camera Table
+        camera_group = QGroupBox("📋 Found USB Cameras")
         camera_layout = QVBoxLayout(camera_group)
 
         self.camera_table = QTableWidget()
         self.camera_table.setColumnCount(5)
         self.camera_table.setHorizontalHeaderLabels([
-            "🎥 Kamera Name", "🔧 Gerät ID", "💾 Hardware ID", "🔌 Status", "⚙️ Aktionen"
+            "🎥 Camera Name", "🔧 Device ID", "💾 Hardware ID", "🔌 Status", "⚙️ Actions"
         ])
 
-        # Tabellen-Styling
+        # Table styling and behavior
         header = self.camera_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
@@ -465,27 +468,37 @@ class CamRenamerMainWindow(QMainWindow):
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
 
+        # Enable column moving and drag & drop
+        header.setSectionsMovable(True)
+        header.setDragDropMode(QHeaderView.DragDropMode.InternalMove)
+
+        # Table behavior settings
         self.camera_table.setAlternatingRowColors(True)
         self.camera_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.camera_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)  # Disable editing
+        self.camera_table.setTextElideMode(Qt.TextElideMode.ElideMiddle)  # Enable text selection with ellipsis
         self.camera_table.setMinimumHeight(300)
+
+        # Enable text selection in individual cells
+        self.camera_table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
 
         camera_layout.addWidget(self.camera_table)
         main_layout.addWidget(camera_group)
 
-        # Umbenennen Bereich
-        rename_group = QGroupBox("✏️ Kamera umbenennen")
+        # Rename Section
+        rename_group = QGroupBox("✏️ Rename camera")
         rename_layout = QVBoxLayout(rename_group)
 
         rename_form_layout = QHBoxLayout()
 
-        rename_form_layout.addWidget(QLabel("📝 Neuer Name:"))
+        rename_form_layout.addWidget(QLabel("📝 New name:"))
 
         self.new_name_edit = QLineEdit()
-        self.new_name_edit.setPlaceholderText("Geben Sie den neuen Namen ein...")
+        self.new_name_edit.setPlaceholderText("Enter the new name...")
         self.new_name_edit.setMinimumHeight(35)
         rename_form_layout.addWidget(self.new_name_edit)
 
-        self.rename_button = QPushButton("✅ Umbenennen")
+        self.rename_button = QPushButton("✅ Rename")
         self.rename_button.clicked.connect(self.rename_selected_camera)
         self.rename_button.setEnabled(False)
         self.rename_button.setMinimumHeight(35)
@@ -493,31 +506,32 @@ class CamRenamerMainWindow(QMainWindow):
 
         rename_layout.addLayout(rename_form_layout)
 
-        # Hinweis-Label
-        hint_label = QLabel("💡 Tipp: Wählen Sie eine Kamera aus der Tabelle aus und geben Sie einen neuen Namen ein.")
+        # Hint label
+        hint_label = QLabel("💡 Tip: Select a camera from the table and enter a new name. You can move columns by dragging the headers.")
         hint_label.setStyleSheet("color: #aaaaaa; font-size: 11px; font-style: italic;")
+        hint_label.setWordWrap(True)
         rename_layout.addWidget(hint_label)
 
         main_layout.addWidget(rename_group)
 
-        # Tabellen-Auswahl Ereignis
+        # Table selection event
         self.camera_table.itemSelectionChanged.connect(self.on_camera_selection_changed)
 
     def clear_table(self):
-        """Leert die Kamera-Tabelle"""
+        """Clears the camera table"""
         self.cameras.clear()
         self.camera_table.setRowCount(0)
         self.new_name_edit.clear()
         self.rename_button.setEnabled(False)
-        self.statusBar().showMessage("Tabelle geleert")
+        self.statusBar().showMessage("Table cleared")
 
     def show_about(self):
-        """Zeigt den Über-Dialog"""
+        """Shows the about dialog"""
         dialog = AboutDialog(self)
         dialog.exec()
 
     def on_camera_selection_changed(self):
-        """Wird aufgerufen wenn eine Kamera ausgewählt wird"""
+        """Called when a camera is selected"""
         selected_rows = self.camera_table.selectionModel().selectedRows()
 
         if selected_rows:
@@ -526,7 +540,7 @@ class CamRenamerMainWindow(QMainWindow):
                 camera = self.cameras[row]
                 self.new_name_edit.setText(camera.friendly_name)
                 self.rename_button.setEnabled(True)
-                self.statusBar().showMessage(f"Kamera ausgewählt: {camera.friendly_name}")
+                self.statusBar().showMessage(f"Camera selected: {camera.friendly_name}")
                 self.new_name_edit.setFocus()
                 self.new_name_edit.selectAll()
             else:
@@ -534,10 +548,10 @@ class CamRenamerMainWindow(QMainWindow):
         else:
             self.rename_button.setEnabled(False)
             self.new_name_edit.clear()
-            self.statusBar().showMessage("Bereit")
+            self.statusBar().showMessage("Ready")
 
     def scan_cameras(self):
-        """Startet den Kamera-Scan"""
+        """Starts the camera scan"""
         if self.scanner_thread and self.scanner_thread.isRunning():
             return
 
@@ -553,87 +567,92 @@ class CamRenamerMainWindow(QMainWindow):
         self.scanner_thread.start()
 
     def on_scan_finished(self):
-        """Wird aufgerufen wenn der Scan beendet ist"""
+        """Called when the scan is finished"""
         self.scan_button.setEnabled(True)
         self.progress_bar.setVisible(False)
 
     def on_cameras_found(self, cameras: List[CameraDevice]):
-        """Wird aufgerufen wenn Kameras gefunden wurden"""
+        """Called when cameras are found"""
         self.cameras = cameras
         self.update_camera_table()
 
     def update_camera_table(self):
-        """Aktualisiert die Kamera-Tabelle"""
+        """Updates the camera table"""
         self.camera_table.setRowCount(len(self.cameras))
 
         for row, camera in enumerate(self.cameras):
             # Name
             name_item = QTableWidgetItem(camera.friendly_name)
-            name_item.setToolTip(f"Vollständiger Name: {camera.friendly_name}")
+            name_item.setToolTip(f"Full name: {camera.friendly_name}")
+            name_item.setFlags(name_item.flags() | Qt.ItemFlag.ItemIsSelectable)
             self.camera_table.setItem(row, 0, name_item)
 
-            # Device ID (gekürzt)
+            # Device ID (shortened)
             device_id = camera.device_id[:50] + "..." if len(camera.device_id) > 50 else camera.device_id
             device_item = QTableWidgetItem(device_id)
-            device_item.setToolTip(f"Vollständige Device ID: {camera.device_id}")
+            device_item.setToolTip(f"Full Device ID: {camera.device_id}")
+            device_item.setFlags(device_item.flags() | Qt.ItemFlag.ItemIsSelectable)
             self.camera_table.setItem(row, 1, device_item)
 
-            # Hardware ID (gekürzt)
+            # Hardware ID (shortened)
             hardware_id = camera.hardware_id[:30] + "..." if len(camera.hardware_id) > 30 else camera.hardware_id
             hardware_item = QTableWidgetItem(hardware_id)
-            hardware_item.setToolTip(f"Vollständige Hardware ID: {camera.hardware_id}")
+            hardware_item.setToolTip(f"Full Hardware ID: {camera.hardware_id}")
+            hardware_item.setFlags(hardware_item.flags() | Qt.ItemFlag.ItemIsSelectable)
             self.camera_table.setItem(row, 2, hardware_item)
 
             # Status
-            status_text = "🟢 Verbunden" if camera.is_connected else "🔴 Getrennt"
+            status_text = "🟢 Connected" if camera.is_connected else "🔴 Disconnected"
             status_item = QTableWidgetItem(status_text)
-            status_item.setToolTip(f"Status: {'Aktiv und betriebsbereit' if camera.is_connected else 'Nicht verfügbar'}")
+            status_item.setToolTip(f"Status: {'Active and ready' if camera.is_connected else 'Not available'}")
+            status_item.setFlags(status_item.flags() | Qt.ItemFlag.ItemIsSelectable)
             self.camera_table.setItem(row, 3, status_item)
 
-            # Aktionen
-            action_item = QTableWidgetItem("👆 Zum Umbenennen auswählen")
-            action_item.setToolTip("Klicken Sie auf diese Zeile, um die Kamera auszuwählen")
+            # Actions
+            action_item = QTableWidgetItem("👆 Select to rename")
+            action_item.setToolTip("Click this row to select the camera")
+            action_item.setFlags(action_item.flags() | Qt.ItemFlag.ItemIsSelectable)
             self.camera_table.setItem(row, 4, action_item)
 
     def rename_selected_camera(self):
-        """Benennt die ausgewählte Kamera um"""
+        """Renames the selected camera"""
         selected_rows = self.camera_table.selectionModel().selectedRows()
 
         if not selected_rows:
-            QMessageBox.warning(self, "⚠️ Warnung", "Bitte wählen Sie eine Kamera aus der Tabelle aus.")
+            QMessageBox.warning(self, "⚠️ Warning", "Please select a camera from the table.")
             return
 
         new_name = self.new_name_edit.text().strip()
         if not new_name:
-            QMessageBox.warning(self, "⚠️ Warnung", "Bitte geben Sie einen neuen Namen ein.")
+            QMessageBox.warning(self, "⚠️ Warning", "Please enter a new name.")
             self.new_name_edit.setFocus()
             return
 
         if len(new_name) > 255:
-            QMessageBox.warning(self, "⚠️ Warnung", "Der Name ist zu lang. Maximal 255 Zeichen erlaubt.")
+            QMessageBox.warning(self, "⚠️ Warning", "The name is too long. Maximum 255 characters allowed.")
             return
 
         row = selected_rows[0].row()
         camera = self.cameras[row]
 
         if new_name == camera.friendly_name:
-            QMessageBox.information(self, "ℹ️ Information", "Der neue Name ist identisch mit dem aktuellen Namen.")
+            QMessageBox.information(self, "ℹ️ Information", "The new name is identical to the current name.")
             return
 
-        # Bestätigung
+        # Confirmation
         reply = QMessageBox.question(
-            self, "❓ Bestätigung",
-            f"Möchten Sie '{camera.friendly_name}' wirklich zu '{new_name}' umbenennen?\n\n"
-            "⚠️ Hinweis: Dies erfordert Administratorrechte und kann einen Neustart erfordern.\n"
-            "Die Änderung wird in der Windows-Registry gespeichert.",
+            self, "❓ Confirmation",
+            f"Do you really want to rename '{camera.friendly_name}' to '{new_name}'?\n\n"
+            "⚠️ Note: This requires administrator rights and may require a restart.\n"
+            "The change will be stored in the Windows Registry.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No
         )
 
         if reply == QMessageBox.StandardButton.Yes:
-            # UI während Umbenennung blockieren
+            # Block UI during renaming
             self.setEnabled(False)
-            self.statusBar().showMessage("Benenne Kamera um...")
+            self.statusBar().showMessage("Renaming camera...")
 
             success = self.update_camera_name_in_registry(camera, new_name)
 
@@ -641,32 +660,32 @@ class CamRenamerMainWindow(QMainWindow):
 
             if success:
                 QMessageBox.information(
-                    self, "✅ Erfolg",
-                    f"Kamera wurde erfolgreich zu '{new_name}' umbenannt!\n\n"
-                    "💡 Ein Neustart des Systems könnte erforderlich sein, damit die Änderungen "
-                    "in allen Anwendungen wirksam werden."
+                    self, "✅ Success",
+                    f"Camera was successfully renamed to '{new_name}'!\n\n"
+                    "💡 A system restart may be required for the changes "
+                    "to take effect in all applications."
                 )
-                # Tabelle aktualisieren
+                # Update table
                 camera.friendly_name = new_name
                 camera.name = new_name
                 self.update_camera_table()
-                self.statusBar().showMessage(f"Kamera erfolgreich umbenannt zu: {new_name}")
+                self.statusBar().showMessage(f"Camera successfully renamed to: {new_name}")
             else:
                 QMessageBox.critical(
-                    self, "❌ Fehler",
-                    "Fehler beim Umbenennen der Kamera!\n\n"
-                    "Mögliche Ursachen:\n"
-                    "• Keine Administratorrechte\n"
-                    "• Kamera wird gerade verwendet\n"
-                    "• Registry-Zugriff verweigert\n\n"
-                    "Versuchen Sie, die Anwendung als Administrator zu starten."
+                    self, "❌ Error",
+                    "Error renaming the camera!\n\n"
+                    "Possible causes:\n"
+                    "• No administrator rights\n"
+                    "• Camera is currently in use\n"
+                    "• Registry access denied\n\n"
+                    "Try running the application as administrator."
                 )
-                self.statusBar().showMessage("Fehler beim Umbenennen")
+                self.statusBar().showMessage("Error renaming")
 
     def update_camera_name_in_registry(self, camera: CameraDevice, new_name: str) -> bool:
-        """Aktualisiert den Kamera-Namen in der Registry"""
+        """Updates the camera name in the registry"""
         try:
-            # Mehrere mögliche Registry-Pfade versuchen
+            # Try multiple possible registry paths
             possible_keys = [
                 f"SYSTEM\\CurrentControlSet\\Enum\\{camera.device_id}",
                 f"SYSTEM\\CurrentControlSet\\Control\\DeviceClasses\\{{6994AD05-93EF-11D0-A3CC-00A0C9223196}}\\#{camera.device_id}#{{6994AD05-93EF-11D0-A3CC-00A0C9223196}}\\Control",
@@ -676,14 +695,14 @@ class CamRenamerMainWindow(QMainWindow):
 
             for registry_path in possible_keys:
                 try:
-                    # Registry-Schlüssel öffnen
+                    # Open registry key
                     with winreg.OpenKey(
                             winreg.HKEY_LOCAL_MACHINE,
                             registry_path,
                             0,
                             winreg.KEY_SET_VALUE | winreg.KEY_WOW64_64KEY
                     ) as key:
-                        # FriendlyName setzen
+                        # Set FriendlyName
                         winreg.SetValueEx(key, "FriendlyName", 0, winreg.REG_SZ, new_name)
                         success = True
                         break
@@ -691,14 +710,14 @@ class CamRenamerMainWindow(QMainWindow):
                 except (FileNotFoundError, PermissionError, OSError):
                     continue
 
-            # Falls direkte Registry-Änderung fehlschlägt, PowerShell verwenden
+            # If direct registry change fails, use PowerShell
             if not success:
                 powershell_cmd = f"""
                 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
                 $deviceID = "{camera.device_id}"
                 $newName = "{new_name}"
 
-                # Versuche Registry-Update über PowerShell
+                # Try registry update via PowerShell
                 try {{
                     $regPath = "HKLM:\\SYSTEM\\CurrentControlSet\\Enum\\$deviceID"
                     if (Test-Path $regPath) {{
@@ -727,14 +746,14 @@ class CamRenamerMainWindow(QMainWindow):
             return success
 
         except subprocess.TimeoutExpired:
-            print("Timeout beim Registry-Update")
+            print("Timeout during registry update")
             return False
         except Exception as e:
-            print(f"Fehler beim Registry-Update: {e}")
+            print(f"Error during registry update: {e}")
             return False
 
     def closeEvent(self, event):
-        """Wird beim Schließen der Anwendung aufgerufen"""
+        """Called when the application is closed"""
         if self.scanner_thread and self.scanner_thread.isRunning():
             self.scanner_thread.terminate()
             self.scanner_thread.wait(3000)
@@ -742,10 +761,10 @@ class CamRenamerMainWindow(QMainWindow):
 
 
 def main():
-    """Hauptfunktion"""
+    """Main function"""
     app = QApplication(sys.argv)
 
-    # App-Eigenschaften setzen
+    # Set app properties
     app.setApplicationName("CamRenamer")
     app.setApplicationVersion("1.1")
     app.setOrganizationName("Retroverse")
@@ -759,40 +778,40 @@ def main():
     painter.setPen(QColor(255, 255, 255))
     painter.setFont(QFont("Arial", 26, QFont.Weight.Bold))
 
-    # Titel zeichnen
+    # Draw title
     title_rect = splash_pixmap.rect()
     title_rect.setTop(80)
     title_rect.setHeight(50)
     painter.drawText(title_rect, Qt.AlignmentFlag.AlignCenter, "🎥 CamRenamer")
 
-    # Untertitel zeichnen
+    # Draw subtitle
     painter.setFont(QFont("Arial", 14))
     subtitle_rect = splash_pixmap.rect()
     subtitle_rect.setTop(140)
     subtitle_rect.setHeight(30)
-    painter.drawText(subtitle_rect, Qt.AlignmentFlag.AlignCenter, "USB Kamera Manager v1.1")
+    painter.drawText(subtitle_rect, Qt.AlignmentFlag.AlignCenter, "USB Camera Manager v1.1")
 
-    # Status zeichnen
+    # Draw status
     painter.setFont(QFont("Arial", 12))
     status_rect = splash_pixmap.rect()
     status_rect.setTop(200)
     status_rect.setHeight(30)
-    painter.drawText(status_rect, Qt.AlignmentFlag.AlignCenter, "Lädt...")
+    painter.drawText(status_rect, Qt.AlignmentFlag.AlignCenter, "Loading...")
 
     painter.end()
 
     splash = QSplashScreen(splash_pixmap)
     splash.show()
 
-    # Kurze Wartezeit für Splash
+    # Short wait for splash
     for i in range(10):
         time.sleep(0.1)
         app.processEvents()
 
-    # Hauptfenster erstellen
+    # Create main window
     window = CamRenamerMainWindow()
 
-    # Splash schließen und Hauptfenster anzeigen
+    # Close splash and show main window
     splash.finish(window)
     window.show()
 
