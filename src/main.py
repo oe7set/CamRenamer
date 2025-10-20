@@ -113,6 +113,147 @@ class CameraScanner(QThread):
             self.cameras_found.emit([])
 
 
+class ExitDialog(QDialog):
+    """Custom exit dialog with donation links"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Thank you for using CamRenamer!")
+        self.setFixedSize(450, 350)
+        self.setModal(True)
+
+        layout = QVBoxLayout()
+
+        # Title
+        title = QLabel("ℹ️ Thank you for using CamRenamer!")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setFont(QFont("Arial", 16, QFont.Weight.Bold))
+        layout.addWidget(title)
+
+        # Main message
+        message = QLabel("If you found this tool helpful, consider supporting its development:")
+        message.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        message.setFont(QFont("Arial", 11))
+        message.setStyleSheet("color: #cccccc; margin: 10px;")
+        message.setWordWrap(True)
+        layout.addWidget(message)
+
+        # Support options
+        support_layout = QVBoxLayout()
+
+        # Share option
+        share_label = QLabel("• Share it with others")
+        share_label.setFont(QFont("Arial", 10))
+        share_label.setStyleSheet("color: #ffffff; margin: 5px;")
+        support_layout.addWidget(share_label)
+
+        # GitHub link
+        github_label = QLabel('• Leave a star on the <a href="https://github.com/oe7set/camrenamer" style="color: #4a90e2; text-decoration: none;">🐙 GitHub Repository</a>')
+        github_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        github_label.setOpenExternalLinks(True)
+        github_label.setFont(QFont("Arial", 10))
+        github_label.setStyleSheet("color: #ffffff; margin: 5px;")
+        support_layout.addWidget(github_label)
+
+        # Donation text
+        donation_text = QLabel("• Consider a donation ☕❤️")
+        donation_text.setFont(QFont("Arial", 10))
+        donation_text.setStyleSheet("color: #ffffff; margin: 5px;")
+        support_layout.addWidget(donation_text)
+
+        layout.addLayout(support_layout)
+
+        # Donation buttons
+        donation_buttons_layout = QHBoxLayout()
+        donation_buttons_layout.setContentsMargins(40, 10, 40, 10)
+
+        # Buy Me A Coffee button
+        coffee_button = QPushButton("☕ Buy Me A Coffee")
+        coffee_button.setMinimumHeight(35)
+        coffee_button.setStyleSheet("""
+            QPushButton {
+                background-color: #ff813f;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #ff9147;
+            }
+            QPushButton:pressed {
+                background-color: #e6732f;
+            }
+        """)
+        coffee_button.clicked.connect(lambda: self.open_url("https://www.buymeacoffee.com/oe7set"))
+        donation_buttons_layout.addWidget(coffee_button)
+
+        # Ko-fi button
+        kofi_button = QPushButton("💙 Ko-fi")
+        kofi_button.setMinimumHeight(35)
+        kofi_button.setStyleSheet("""
+            QPushButton {
+                background-color: #29abe0;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #31b8e8;
+            }
+            QPushButton:pressed {
+                background-color: #2399c7;
+            }
+        """)
+        kofi_button.clicked.connect(lambda: self.open_url("https://ko-fi.com/O5O31L3XGA"))
+        donation_buttons_layout.addWidget(kofi_button)
+
+        layout.addLayout(donation_buttons_layout)
+
+        # Exit message
+        exit_message = QLabel("The application will now exit.")
+        exit_message.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        exit_message.setFont(QFont("Arial", 10))
+        exit_message.setStyleSheet("color: #aaaaaa; margin: 15px 5px 5px 5px;")
+        layout.addWidget(exit_message)
+
+        # OK Button
+        ok_button = QPushButton("OK - Exit Application")
+        ok_button.clicked.connect(self.accept)
+        ok_button.setMinimumHeight(40)
+        ok_button.setStyleSheet("""
+            QPushButton {
+                background-color: #4a90e2;
+                color: white;
+                border: none;
+                padding: 12px 20px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 12px;
+                margin: 10px;
+            }
+            QPushButton:hover {
+                background-color: #5ba0f2;
+            }
+            QPushButton:pressed {
+                background-color: #3a80d2;
+            }
+        """)
+        layout.addWidget(ok_button)
+
+        self.setLayout(layout)
+
+    def open_url(self, url):
+        """Opens URL in default browser"""
+        import webbrowser
+        webbrowser.open(url)
+
+
 class AboutDialog(QDialog):
     """About dialog"""
 
@@ -1028,18 +1169,10 @@ class CamRenamerMainWindow(QMainWindow):
             self.scanner_thread.terminate()
             self.scanner_thread.wait(3000)
 
-        # If any successful rename occurred, show a message on exit
+        # If any successful rename occurred, show the custom exit dialog
         if self.successful_rename_occurred:
-            QMessageBox.information(
-                self, "ℹ️ Information",
-                "Thank you for using CamRenamer!\n\n"
-                "If you found this tool helpful, consider supporting its development:\n"
-                "• Share it with others\n"
-                "• Leave a star on the GitHub repository\n"
-                "• Consider a donation ☕❤️\n\n"
-                "The application will now exit.",
-                QMessageBox.StandardButton.Ok
-            )
+            dialog = ExitDialog(self)
+            dialog.exec()
 
         event.accept()
 
