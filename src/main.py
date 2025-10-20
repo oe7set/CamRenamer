@@ -119,7 +119,7 @@ class AboutDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("About CamRenamer")
-        self.setFixedSize(450, 350)
+        self.setFixedSize(500, 450)
         self.setModal(True)
 
         layout = QVBoxLayout()
@@ -142,6 +142,13 @@ class AboutDialog(QDialog):
         author.setFont(QFont("Arial", 10))
         layout.addWidget(author)
 
+        # GitHub Link
+        github_label = QLabel('<a href="https://github.com/oe7set/camrenamer" style="color: #4a90e2; text-decoration: none;">🐙 GitHub Repository</a>')
+        github_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        github_label.setOpenExternalLinks(True)
+        github_label.setFont(QFont("Arial", 11))
+        layout.addWidget(github_label)
+
         # Description
         desc = QTextEdit()
         desc.setReadOnly(True)
@@ -157,6 +164,68 @@ class AboutDialog(QDialog):
         )
         layout.addWidget(desc)
 
+        # Donation section
+        donation_group = QGroupBox("💖 Support Development")
+        donation_layout = QVBoxLayout(donation_group)
+
+        donation_text = QLabel("If you find this tool useful, consider supporting its development:")
+        donation_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        donation_text.setFont(QFont("Arial", 10))
+        donation_text.setStyleSheet("color: #cccccc; margin: 5px;")
+        donation_layout.addWidget(donation_text)
+
+        # Donation buttons layout
+        buttons_layout = QHBoxLayout()
+
+        # Buy Me A Coffee button
+        coffee_button = QPushButton("☕ Buy Me A Coffee")
+        coffee_button.setMinimumHeight(35)
+        coffee_button.setStyleSheet("""
+            QPushButton {
+                background-color: #ff813f;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #ff9147;
+            }
+            QPushButton:pressed {
+                background-color: #e6732f;
+            }
+        """)
+        coffee_button.clicked.connect(lambda: self.open_url("https://www.buymeacoffee.com/oe7set"))
+        buttons_layout.addWidget(coffee_button)
+
+        # Ko-fi button
+        kofi_button = QPushButton("💙 Ko-fi")
+        kofi_button.setMinimumHeight(35)
+        kofi_button.setStyleSheet("""
+            QPushButton {
+                background-color: #29abe0;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #31b8e8;
+            }
+            QPushButton:pressed {
+                background-color: #2399c7;
+            }
+        """)
+        kofi_button.clicked.connect(lambda: self.open_url("https://ko-fi.com/O5O31L3XGA"))
+        buttons_layout.addWidget(kofi_button)
+
+        donation_layout.addLayout(buttons_layout)
+        layout.addWidget(donation_group)
+
         # OK Button
         ok_button = QPushButton("OK")
         ok_button.clicked.connect(self.accept)
@@ -164,6 +233,11 @@ class AboutDialog(QDialog):
         layout.addWidget(ok_button)
 
         self.setLayout(layout)
+
+    def open_url(self, url):
+        """Opens URL in default browser"""
+        import webbrowser
+        webbrowser.open(url)
 
 
 class ProportionalHeaderView(QHeaderView):
@@ -211,10 +285,11 @@ class CamRenamerMainWindow(QMainWindow):
         super().__init__()
         self.cameras: List[CameraDevice] = []
         self.scanner_thread: Optional[CameraScanner] = None
+        self.successful_rename_occurred = False  # Track if any successful rename happened
 
         self.setWindowTitle("CamRenamer - USB Camera Manager v1.1")
-        self.setMinimumSize(950, 650)
-        self.resize(1150, 750)
+        self.setMinimumSize(640, 480)
+        self.resize(1200, 750)
 
         # Apply modern design
         self.apply_modern_style()
@@ -259,17 +334,47 @@ class CamRenamerMainWindow(QMainWindow):
             }
 
             QHeaderView::section {
-                background-color: #404040;
+                background-color: #3c3c3c;
                 color: #ffffff;
                 padding: 12px;
                 border: none;
                 border-right: 1px solid #555555;
+                border-bottom: 1px solid #555555;
                 font-weight: bold;
                 font-size: 11px;
             }
 
             QHeaderView::section:hover {
                 background-color: #4a90e2;
+            }
+
+            QTableWidget QHeaderView {
+                background-color: #3c3c3c;
+            }
+
+            QTableWidget QHeaderView::section {
+                background-color: #3c3c3c;
+                color: #ffffff;
+                padding: 1px 12px;
+                border: none;
+                border-right: 1px solid #555555;
+                border-bottom: 1px solid #555555;
+                font-weight: bold;
+                font-size: 14px;
+            }
+
+            QTableWidget QHeaderView::section:hover {
+                background-color: #4a90e2;
+            }
+
+            QTableWidget QTableCornerButton::section {
+                background-color: #3c3c3c;
+                border: 1px solid #555555;
+            }
+
+            QTableCornerButton::section {
+                background-color: #3c3c3c;
+                border: 1px solid #555555;
             }
 
             QPushButton {
@@ -357,6 +462,28 @@ class CamRenamerMainWindow(QMainWindow):
                 border: none;
                 spacing: 6px;
                 padding: 6px;
+                color: #ffffff;
+            }
+
+            QToolBar QToolButton {
+                color: #ffffff;
+                background-color: transparent;
+                border: none;
+                padding: 4px;
+                border-radius: 4px;
+                font-size: 12px;
+                font-weight: normal;
+                min-width: 80px;
+            }
+
+            QToolBar QToolButton:hover {
+                background-color: #4a90e2;
+                color: #ffffff;
+            }
+
+            QToolBar QToolButton:pressed {
+                background-color: #3a80d2;
+                color: #ffffff;
             }
 
             QMenuBar {
@@ -401,6 +528,95 @@ class CamRenamerMainWindow(QMainWindow):
                 border-radius: 4px;
                 color: #ffffff;
                 padding: 8px;
+            }
+
+            /* Scrollbar Styles for Dark Theme */
+            QTableWidget QScrollBar:vertical {
+                background-color: #2b2b2b;
+                width: 16px;
+                border: 1px solid #555555;
+                border-radius: 8px;
+                margin: 0px;
+            }
+
+            QTableWidget QScrollBar::handle:vertical {
+                background-color: #4a90e2;
+                min-height: 20px;
+                border-radius: 6px;
+                margin: 2px;
+            }
+
+            QTableWidget QScrollBar::handle:vertical:hover {
+                background-color: #5ba0f2;
+            }
+
+            QTableWidget QScrollBar::handle:vertical:pressed {
+                background-color: #3a80d2;
+            }
+
+            QTableWidget QScrollBar::add-line:vertical,
+            QTableWidget QScrollBar::sub-line:vertical {
+                border: none;
+                background: none;
+                height: 0px;
+            }
+
+            QTableWidget QScrollBar::up-arrow:vertical,
+            QTableWidget QScrollBar::down-arrow:vertical {
+                background: none;
+                border: none;
+            }
+
+            QTableWidget QScrollBar::add-page:vertical,
+            QTableWidget QScrollBar::sub-page:vertical {
+                background: none;
+            }
+
+            QTableWidget QScrollBar:horizontal {
+                background-color: #2b2b2b;
+                height: 16px;
+                border: 1px solid #555555;
+                border-radius: 8px;
+                margin: 0px;
+            }
+
+            QTableWidget QScrollBar::handle:horizontal {
+                background-color: #4a90e2;
+                min-width: 20px;
+                border-radius: 6px;
+                margin: 2px;
+            }
+
+            QTableWidget QScrollBar::handle:horizontal:hover {
+                background-color: #5ba0f2;
+            }
+
+            QTableWidget QScrollBar::handle:horizontal:pressed {
+                background-color: #3a80d2;
+            }
+
+            QTableWidget QScrollBar::add-line:horizontal,
+            QTableWidget QScrollBar::sub-line:horizontal {
+                border: none;
+                background: none;
+                width: 0px;
+            }
+
+            QTableWidget QScrollBar::left-arrow:horizontal,
+            QTableWidget QScrollBar::right-arrow:horizontal {
+                background: none;
+                border: none;
+            }
+
+            QTableWidget QScrollBar::add-page:horizontal,
+            QTableWidget QScrollBar::sub-page:horizontal {
+                background: none;
+            }
+
+            /* Corner widget between scrollbars */
+            QTableWidget QScrollBar::corner {
+                background-color: #2b2b2b;
+                border: 1px solid #555555;
             }
         """)
 
@@ -514,7 +730,11 @@ class CamRenamerMainWindow(QMainWindow):
         self.camera_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.camera_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)  # Disable editing
         self.camera_table.setTextElideMode(Qt.TextElideMode.ElideMiddle)  # Enable text selection with ellipsis
-        self.camera_table.setMinimumHeight(300)
+        self.camera_table.setMinimumHeight(50)
+
+        # Horizontales Scrollen aktivieren
+        self.camera_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.camera_table.setHorizontalScrollMode(QTableWidget.ScrollMode.ScrollPerPixel)
 
         # Enable text selection in individual cells
         self.camera_table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
@@ -719,6 +939,7 @@ class CamRenamerMainWindow(QMainWindow):
                 camera.name = new_name
                 self.update_camera_table()
                 self.statusBar().showMessage(f"Camera successfully renamed to: {new_name}")
+                self.successful_rename_occurred = True  # Mark that a successful rename happened
             else:
                 QMessageBox.critical(
                     self, "❌ Error",
@@ -806,6 +1027,20 @@ class CamRenamerMainWindow(QMainWindow):
         if self.scanner_thread and self.scanner_thread.isRunning():
             self.scanner_thread.terminate()
             self.scanner_thread.wait(3000)
+
+        # If any successful rename occurred, show a message on exit
+        if self.successful_rename_occurred:
+            QMessageBox.information(
+                self, "ℹ️ Information",
+                "Thank you for using CamRenamer!\n\n"
+                "If you found this tool helpful, consider supporting its development:\n"
+                "• Share it with others\n"
+                "• Leave a star on the GitHub repository\n"
+                "• Consider a donation ☕❤️\n\n"
+                "The application will now exit.",
+                QMessageBox.StandardButton.Ok
+            )
+
         event.accept()
 
 
@@ -818,6 +1053,17 @@ def main():
     app.setApplicationVersion("1.1")
     app.setOrganizationName("Retroverse")
     app.setOrganizationDomain("retroverse.de")
+
+    # Enable high-DPI support and improve text rendering
+    app.setAttribute(Qt.ApplicationAttribute.AA_EnableHighDpiScaling, True)
+    app.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps, True)
+    app.setAttribute(Qt.ApplicationAttribute.AA_SynthesizeMouseForUnhandledTabletEvents, False)
+
+    # Set default font with antialiasing
+    font = QFont("Segoe UI", 10)
+    font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
+    font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
+    app.setFont(font)
 
     # Splash Screen
     splash_pixmap = QPixmap(450, 300)
