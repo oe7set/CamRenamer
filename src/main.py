@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, QWidget,
     QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem,
     QMessageBox, QHeaderView, QGroupBox, QProgressBar,
-    QSplashScreen, QToolBar, QDialog, QTextEdit
+    QSplashScreen, QToolBar, QDialog, QTextEdit, QCheckBox
 )
 from PySide6.QtCore import Qt, QThread, Signal, QTimer
 from PySide6.QtGui import QFont, QColor, QPixmap, QPainter, QAction
@@ -26,6 +26,514 @@ class CameraDevice:
     friendly_name: str
     hardware_id: str
     is_connected: bool = True
+
+
+class RegistrySearchDialog(QDialog):
+    """Dialog to show registry search progress"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Registry Search Progress")
+        self.setFixedSize(600, 400)
+        self.setModal(True)
+
+        layout = QVBoxLayout()
+
+        # Title
+        title = QLabel("🔍 Searching Registry Entries...")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+        layout.addWidget(title)
+
+        # Progress bar
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 100)
+        layout.addWidget(self.progress_bar)
+
+        # Status label
+        self.status_label = QLabel("Initializing search...")
+        layout.addWidget(self.status_label)
+
+        # Search results text area
+        self.results_text = QTextEdit()
+        self.results_text.setReadOnly(True)
+        self.results_text.setMinimumHeight(250)
+        layout.addWidget(self.results_text)
+
+        # Close button
+        self.close_button = QPushButton("Close")
+        self.close_button.clicked.connect(self.accept)
+        self.close_button.setEnabled(False)  # Disabled until search completes
+        layout.addWidget(self.close_button)
+
+        self.setLayout(layout)
+
+    def update_progress(self, value, status):
+        """Update progress bar and status"""
+        self.progress_bar.setValue(value)
+        self.status_label.setText(status)
+
+    def add_result(self, text):
+        """Add text to results area"""
+        self.results_text.append(text)
+
+    def search_completed(self):
+        """Called when search is completed"""
+        self.close_button.setEnabled(True)
+        self.status_label.setText("Search completed!")
+
+
+class EnhancedRegistrySearchThread(QThread):
+    """Enhanced thread for comprehensive registry search"""
+    search_completed = Signal(list)
+    progress_updated = Signal(int, str)
+    result_found = Signal(str)
+
+    def __init__(self, camera: CameraDevice, search_options: dict = None):
+        super().__init__()
+        self.camera = camera
+        self.search_options = search_options or self.load_default_search_options()
+
+    def load_default_search_options(self):
+        """Load search options from settings or return defaults"""
+        defaults = {
+            "standard_device_paths": True,
+            "device_classes": True,
+            "usb_interfaces": True,
+            "system_drivers": False,
+            "control_entries": False,
+            "powershell_extended": False,
+            "vid_pid_matching": True,
+            "friendly_name_search": True
+        }
+
+        try:
+            import json
+            if os.path.exists("search_options.json"):
+                with open("search_options.json", "r") as f:
+                    saved_options = json.load(f)
+                    defaults.update(saved_options)
+        except Exception:
+            pass
+
+        return defaults
+
+    def run(self):
+        """Comprehensive registry search with detailed progress"""
+        try:
+            self.progress_updated.emit(0, "Starting registry search...")
+            registry_paths = self.comprehensive_registry_search()
+            self.search_completed.emit(registry_paths)
+        except Exception as e:
+            self.result_found.emit(f"❌ Error in registry search: {str(e)}")
+            self.search_completed.emit([])
+
+    def comprehensive_registry_search(self) -> List[str]:
+        """Comprehensive registry search with configurable strategies"""
+        registry_paths = []
+        progress = 0
+        total_steps = sum(1 for key, value in self.search_options.items() if value and key != 'vid_pid_matching' and key != 'friendly_name_search')
+        step_increment = 90 / max(total_steps, 1)  # Reserve 10% for final processing
+
+        # Extract VID/PID if matching is enabled
+        vid_pid = ""
+        if self.search_options.get("vid_pid_matching", True):
+            vid_pid = self.extract_vid_pid()
+            self.result_found.emit(f"🔍 VID/PID extraction: {'Enabled - ' + vid_pid if vid_pid else 'Enabled but no VID/PID found'}")
+        else:
+            self.result_found.emit("⏭️ VID/PID matching: Disabled (skipped)")
+
+
+        if self.search_options.get("standard_device_paths", True):
+            progress += step_increment
+            self.progress_updated.emit(int(progress), "Searching standard device paths...")
+            standard_paths = self.search_standard_device_paths()
+            registry_paths.extend(standard_paths)
+        else:
+            self.result_found.emit("⏭️ Standard Device Paths: Disabled (skipped)")
+
+        # Step 2: Device Classes search
+        if self.search_options.get("device_classes", True):
+            progress += step_increment
+            self.progress_updated.emit(int(progress), "Searching Device Classes...")
+            device_class_paths = self.search_device_classes(vid_pid)
+            registry_paths.extend(device_class_paths)
+        else:
+            self.result_found.emit("⏭️ Device Classes: Disabled (skipped)")
+
+        # Step 3: USB interfaces and storage paths
+        if self.search_options.get("usb_interfaces", True):
+            progress += step_increment
+            self.progress_updated.emit(int(progress), "Searching USB interfaces...")
+            usb_paths = self.search_usb_interfaces(vid_pid)
+            registry_paths.extend(usb_paths)
+        else:
+            self.result_found.emit("⏭️ USB Interfaces: Disabled (skipped)")
+
+        # Step 4: System driver entries
+        if self.search_options.get("system_drivers", False):
+            progress += step_increment
+            self.progress_updated.emit(int(progress), "Searching system drivers...")
+            driver_paths = self.search_system_drivers(vid_pid)
+            registry_paths.extend(driver_paths)
+        else:
+            self.result_found.emit("⏭️ System Drivers: Disabled (skipped)")
+
+        # Step 5: Control panel and device manager entries
+        if self.search_options.get("control_entries", False):
+            progress += step_increment
+            self.progress_updated.emit(int(progress), "Searching control panel entries...")
+            control_paths = self.search_control_entries(vid_pid)
+            registry_paths.extend(control_paths)
+        else:
+            self.result_found.emit("⏭️ Control Panel Entries: Disabled (skipped)")
+
+        # Step 6: Extended PowerShell-based search
+        if self.search_options.get("powershell_extended", False):
+            progress += step_increment
+            self.progress_updated.emit(int(progress), "Performing extended PowerShell search...")
+            ps_paths = self.powershell_comprehensive_search(vid_pid)
+            registry_paths.extend(ps_paths)
+        else:
+            self.result_found.emit("⏭️ PowerShell Extended Search: Disabled (skipped)")
+
+        # Step 7: Friendly name search
+        # if self.search_options.get("friendly_name_search", True):
+        #     progress += step_increment
+        #     self.progress_updated.emit(int(progress), "Searching by friendly names...")
+        #     friendly_paths = self.search_by_friendly_name()
+        #     registry_paths.extend(friendly_paths)
+        # else:
+        #     self.result_found.emit("⏭️ Friendly Name Search: Disabled (skipped)")
+
+        # Remove duplicates and filter valid paths
+        self.progress_updated.emit(95, "Filtering and validating results...")
+        unique_paths = list(set(registry_paths))
+        valid_paths = [path for path in unique_paths if path and len(path) > 10]
+
+        # Show summary
+        enabled_criteria = [key.replace('_', ' ').title() for key, value in self.search_options.items() if value]
+        disabled_criteria = [key.replace('_', ' ').title() for key, value in self.search_options.items() if not value]
+
+        self.result_found.emit(f"\n📊 Search Summary:")
+        self.result_found.emit(f"✅ Enabled criteria: {', '.join(enabled_criteria) if enabled_criteria else 'None'}")
+        self.result_found.emit(f"⏭️ Skipped criteria: {', '.join(disabled_criteria) if disabled_criteria else 'None'}")
+        self.result_found.emit(f"✅ Found {len(valid_paths)} unique registry paths")
+
+        for path in valid_paths:
+            self.result_found.emit(f"📝 {path}")
+
+        self.progress_updated.emit(100, "Search completed!")
+        return valid_paths
+
+    def extract_vid_pid(self) -> str:
+        """Extract VID and PID from hardware ID"""
+        import re
+        if not self.camera.hardware_id:
+            return ""
+
+        match = re.search(r'VID_([0-9A-F]{4})&PID_([0-9A-F]{4})', self.camera.hardware_id, re.IGNORECASE)
+        if match:
+            return f"VID_{match.group(1)}&PID_{match.group(2)}"
+        return ""
+
+    def search_standard_device_paths(self) -> List[str]:
+        """Search standard device enumeration paths"""
+        paths = []
+
+        # Standard enumeration path
+        base_path = f"SYSTEM\\CurrentControlSet\\Enum\\{self.camera.device_id}"
+        paths.append(base_path)
+
+        # Add Device Parameters subkey
+        paths.append(f"{base_path}\\Device Parameters")
+
+        # Add LogConf subkey
+        paths.append(f"{base_path}\\LogConf")
+
+        self.result_found.emit(f"📂 Added {len(paths)} standard device paths")
+        return paths
+
+    def search_device_classes(self, vid_pid: str) -> List[str]:
+        """Search in Device Classes registry"""
+        if not vid_pid:
+            return []
+
+        powershell_cmd = f"""
+        [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+        $vidPid = "{vid_pid}"
+        $foundPaths = @()
+        
+        # Comprehensive Device Classes search
+        $deviceClassesPath = "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\DeviceClasses"
+        
+        # Extended list of relevant GUIDs for cameras and multimedia devices
+        $relevantGUIDs = @(
+            "65e8773d-8f56-11d0-a3b9-00a0c9223196",  # Image devices
+            "e5323777-f976-4f5b-9b55-b94699c46e44",  # Camera devices
+            "6994AD05-93EF-11D0-A3CC-00A0C9223196",  # Image class
+            "4D36E96C-E325-11CE-BFC1-08002BE10318",  # Sound/Video devices
+            "6bdd1fc6-810f-11d0-bec7-08002be2092f",  # USB devices
+            "4d36e972-e325-11ce-bfc1-08002be10318",  # Multimedia devices
+            "c06ff265-ae09-48f0-812c-16753d7cba83",  # WDM streaming devices
+            "6994ad04-93ef-11d0-a3cc-00a0c9223196"   # Still image devices
+        )
+        
+        foreach ($guid in $relevantGUIDs) {{
+            $guidPath = Join-Path $deviceClassesPath $guid
+            if (Test-Path $guidPath) {{
+                try {{
+                    $subKeys = Get-ChildItem $guidPath -ErrorAction SilentlyContinue
+                    foreach ($subKey in $subKeys) {{
+                        if ($subKey.Name -like "*$vidPid*") {{
+                            $relativePath = $subKey.Name -replace "HKEY_LOCAL_MACHINE\\\\", ""
+                            $foundPaths += $relativePath
+                            
+                            # Check for nested paths
+                            $nestedPaths = @("#GLOBAL", "Control", "Device Parameters")
+                            foreach ($nested in $nestedPaths) {{
+                                $nestedPath = Join-Path $subKey.PSPath $nested
+                                if (Test-Path $nestedPath) {{
+                                    $foundPaths += "$relativePath\\$nested"
+                                }}
+                            }}
+                        }}
+                    }}
+                }} catch {{
+                    # Continue on access errors
+                }}
+            }}
+        }}
+        
+        $foundPaths | Where-Object {{$_ -ne ""}} | ForEach-Object {{ Write-Output $_ }}
+        """
+
+        paths = self.execute_powershell(powershell_cmd)
+        self.result_found.emit(f"🎯 Found {len(paths)} Device Classes entries")
+        return paths
+
+    def search_usb_interfaces(self, vid_pid: str) -> List[str]:
+        """Search USB interface and hub entries"""
+        if not vid_pid:
+            return []
+
+        powershell_cmd = f"""
+        [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+        $vidPid = "{vid_pid}"
+        $foundPaths = @()
+        
+        # Search USB-specific registry locations
+        $usbPaths = @(
+            "HKLM:\\SYSTEM\\CurrentControlSet\\Enum\\USB",
+            "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\usbhub\\Enum",
+            "HKLM:\\SYSTEM\\CurrentControlSet\\Services\\usbccgp\\Enum"
+        )
+        
+        foreach ($usbPath in $usbPaths) {{
+            if (Test-Path $usbPath) {{
+                try {{
+                    Get-ChildItem $usbPath -Recurse -ErrorAction SilentlyContinue | 
+                    Where-Object {{$_.Name -like "*$vidPid*"}} |
+                    ForEach-Object {{
+                        $relativePath = $_.Name -replace "HKEY_LOCAL_MACHINE\\\\", ""
+                        $foundPaths += $relativePath
+                    }}
+                }} catch {{
+                    # Continue on errors
+                }}
+            }}
+        }}
+        
+        $foundPaths | Where-Object {{$_ -ne ""}} | ForEach-Object {{ Write-Output $_ }}
+        """
+
+        paths = self.execute_powershell(powershell_cmd)
+        self.result_found.emit(f"🔌 Found {len(paths)} USB interface entries")
+        return paths
+
+    def search_system_drivers(self, vid_pid: str) -> List[str]:
+        """Search system driver registry entries"""
+        if not vid_pid:
+            return []
+
+        powershell_cmd = f"""
+        [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+        $vidPid = "{vid_pid}"
+        $foundPaths = @()
+        
+        # Search in Services for driver entries
+        $servicesPath = "HKLM:\\SYSTEM\\CurrentControlSet\\Services"
+        
+        # Common camera/video driver services
+        $driverServices = @(
+            "usbvideo", "ksthunk", "stream", "swenum", "usbaudio", 
+            "usbccgp", "usbhub", "winusb", "wudfrd", "WUDFRd"
+        )
+        
+        foreach ($service in $driverServices) {{
+            $servicePath = Join-Path $servicesPath $service
+            if (Test-Path $servicePath) {{
+                try {{
+                    $enumPath = Join-Path $servicePath "Enum"
+                    if (Test-Path $enumPath) {{
+                        $enumProps = Get-ItemProperty $enumPath -ErrorAction SilentlyContinue
+                        $enumProps.PSObject.Properties | Where-Object {{
+                            $_.Value -like "*$vidPid*"
+                        }} | ForEach-Object {{
+                            $relativePath = "SYSTEM\\CurrentControlSet\\Services\\$service\\Enum"
+                            $foundPaths += $relativePath
+                        }}
+                    }}
+                }} catch {{
+                    # Continue
+                }}
+            }}
+        }}
+        
+        $foundPaths | Where-Object {{$_ -ne ""}} | ForEach-Object {{ Write-Output $_ }}
+        """
+
+        paths = self.execute_powershell(powershell_cmd)
+        self.result_found.emit(f"⚙️ Found {len(paths)} system driver entries")
+        return paths
+
+    def search_control_entries(self, vid_pid: str) -> List[str]:
+        """Search control panel and device manager entries"""
+        if not vid_pid:
+            return []
+
+        powershell_cmd = f"""
+        [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+        $vidPid = "{vid_pid}"
+        $foundPaths = @()
+        
+        # Search in Class registry for device classes
+        $classPath = "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Class"
+        
+        if (Test-Path $classPath) {{
+            try {{
+                Get-ChildItem $classPath -ErrorAction SilentlyContinue | ForEach-Object {{
+                    $classGuidPath = $_.PSPath
+                    try {{
+                        Get-ChildItem $classGuidPath -ErrorAction SilentlyContinue | ForEach-Object {{
+                            $subKeyPath = $_.PSPath
+                            try {{
+                                $props = Get-ItemProperty $subKeyPath -ErrorAction SilentlyContinue
+                                if ($props.MatchingDeviceId -like "*$vidPid*" -or 
+                                    $props.HardwareID -like "*$vidPid*") {{
+                                    $relativePath = $_.Name -replace "HKEY_LOCAL_MACHINE\\\\", ""
+                                    $foundPaths += $relativePath
+                                }}
+                            }} catch {{
+                                # Continue
+                            }}
+                        }}
+                    }} catch {{
+                        # Continue
+                    }}
+                }}
+            }} catch {{
+                # Continue
+            }}
+        }}
+        
+        $foundPaths | Where-Object {{$_ -ne ""}} | ForEach-Object {{ Write-Output $_ }}
+        """
+
+        paths = self.execute_powershell(powershell_cmd)
+        self.result_found.emit(f"🎛️ Found {len(paths)} control panel entries")
+        return paths
+
+    def powershell_comprehensive_search(self, vid_pid: str) -> List[str]:
+        """Comprehensive PowerShell-based search"""
+        if not vid_pid:
+            return []
+
+        powershell_cmd = f"""
+        [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+        $vidPid = "{vid_pid}"
+        $deviceId = "{self.camera.device_id}"
+        $foundPaths = @()
+        
+        # Search for any registry keys containing our VID/PID
+        $searchRoots = @(
+            "HKLM:\\SYSTEM\\CurrentControlSet",
+            "HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion",
+            "HKLM:\\SOFTWARE\\Classes"
+        )
+        
+        foreach ($root in $searchRoots) {{
+            if (Test-Path $root) {{
+                try {{
+                    # Use Get-ChildItem with specific depth to avoid infinite recursion
+                    Get-ChildItem $root -Recurse -Depth 3 -ErrorAction SilentlyContinue |
+                    Where-Object {{$_.Name -like "*$vidPid*" -or $_.Name -like "*$deviceId*"}} |
+                    ForEach-Object {{
+                        $relativePath = $_.Name -replace "HKEY_LOCAL_MACHINE\\\\", ""
+                        $foundPaths += $relativePath
+                    }}
+                }} catch {{
+                    # Continue on access errors
+                }}
+            }}
+        }}
+        
+        # Also search for FriendlyName entries that might reference our device
+        try {{
+            Get-ChildItem "HKLM:\\SYSTEM\\CurrentControlSet\\Enum" -Recurse -ErrorAction SilentlyContinue |
+            Where-Object {{
+                try {{
+                    $props = Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue
+                    $props.FriendlyName -like "*{self.camera.friendly_name.split()[0]}*" -or
+                    $props.DeviceDesc -like "*{self.camera.friendly_name.split()[0]}*"
+                }} catch {{
+                    $false
+                }}
+            }} |
+            ForEach-Object {{
+                $relativePath = $_.Name -replace "HKEY_LOCAL_MACHINE\\\\", ""
+                $foundPaths += $relativePath
+            }}
+        }} catch {{
+            # Continue
+        }}
+        
+        $foundPaths | Where-Object {{$_ -ne ""}} | Select-Object -Unique | ForEach-Object {{ Write-Output $_ }}
+        """
+
+        paths = self.execute_powershell(powershell_cmd)
+        self.result_found.emit(f"🔍 Found {len(paths)} comprehensive search results")
+        return paths
+
+    def execute_powershell(self, cmd: str) -> List[str]:
+        """Execute PowerShell command and return results"""
+        try:
+            result = subprocess.run(
+                ["powershell", "-ExecutionPolicy", "Bypass", "-Command", cmd],
+                capture_output=True,
+                text=True,
+                encoding='utf-8',
+                errors='replace',
+                timeout=30
+            )
+
+            if result.returncode == 0 and result.stdout.strip():
+                paths = []
+                for line in result.stdout.strip().split('\n'):
+                    path = line.strip()
+                    if path:
+                        paths.append(path)
+                return paths
+        except Exception as e:
+            self.result_found.emit(f"⚠️ PowerShell execution error: {str(e)}")
+
+        return []
+
+
+# Update the original RegistrySearchThread class to use the enhanced version
+class RegistrySearchThread(EnhancedRegistrySearchThread):
+    """Updated registry search thread - inherits from enhanced version"""
+    pass
 
 
 class RegistrySearchThread(QThread):
@@ -1176,7 +1684,7 @@ class CamRenamerMainWindow(QMainWindow):
             self.camera_table.setItem(row, 4, action_item)
 
     def rename_selected_camera(self):
-        """Renames the selected camera"""
+        """Renames the selected camera with enhanced registry search dialog"""
         selected_rows = self.camera_table.selectionModel().selectedRows()
 
         if not selected_rows:
@@ -1211,33 +1719,159 @@ class CamRenamerMainWindow(QMainWindow):
         )
 
         if reply == QMessageBox.StandardButton.Yes:
-            # Block UI during renaming
-            self.setEnabled(False)
-            self.statusBar().showMessage("Renaming camera...")
+            # Show registry search dialog
+            search_dialog = RegistrySearchDialog(self)
 
-            success = self.update_camera_name_in_registry(camera, new_name)
+            # Create and setup the enhanced registry search thread
+            registry_search = EnhancedRegistrySearchThread(camera)
+            registry_paths = []
 
-            self.setEnabled(True)
+            # Connect signals to the dialog
+            def on_progress_updated(value, status):
+                search_dialog.update_progress(value, status)
 
-            if success:
-                # Success message is now handled in update_camera_name_in_registry
-                # Update table
-                camera.friendly_name = new_name
-                camera.name = new_name
-                self.update_camera_table()
-                self.statusBar().showMessage(f"Camera successfully renamed to: {new_name}")
-                self.successful_rename_occurred = True  # Mark that a successful rename happened
+            def on_result_found(text):
+                search_dialog.add_result(text)
+
+            def on_search_completed(paths):
+                nonlocal registry_paths
+                registry_paths = paths
+                search_dialog.search_completed()
+                if paths:
+                    search_dialog.add_result(f"\n🎉 Registry search completed! Found {len(paths)} paths total.")
+                else:
+                    search_dialog.add_result("\n❌ No registry paths found. The camera might not be properly detected.")
+
+            registry_search.progress_updated.connect(on_progress_updated)
+            registry_search.result_found.connect(on_result_found)
+            registry_search.search_completed.connect(on_search_completed)
+
+            # Start the search
+            registry_search.start()
+
+            # Show the dialog (it will be modal)
+            search_dialog.exec()
+
+            # Wait for search to complete if still running
+            if registry_search.isRunning():
+                registry_search.wait()
+
+            # Now proceed with the actual renaming if we found paths
+            if registry_paths:
+                success = self.update_camera_name_in_registry_with_paths(camera, new_name, registry_paths)
+
+                if success:
+                    # Update table
+                    camera.friendly_name = new_name
+                    camera.name = new_name
+                    self.update_camera_table()
+                    self.statusBar().showMessage(f"Camera successfully renamed to: {new_name}")
+                    self.successful_rename_occurred = True
+                else:
+                    QMessageBox.critical(
+                        self, "❌ Error",
+                        "Error renaming the camera!\n\n"
+                        "Possible causes:\n"
+                        "• No administrator rights\n"
+                        "• Camera is currently in use\n"
+                        "• Registry access denied\n\n"
+                        "Try running the application as administrator."
+                    )
+                    self.statusBar().showMessage("Error renaming")
             else:
-                QMessageBox.critical(
-                    self, "❌ Error",
-                    "Error renaming the camera!\n\n"
-                    "Possible causes:\n"
-                    "• No administrator rights\n"
-                    "• Camera is currently in use\n"
-                    "• Registry access denied\n\n"
-                    "Try running the application as administrator."
+                QMessageBox.warning(
+                    self, "⚠️ No Registry Paths Found",
+                    f"Could not find any registry entries for camera '{camera.friendly_name}'.\n\n"
+                    "This might happen if:\n"
+                    "• The camera is not properly installed\n"
+                    "• Access to registry is restricted\n"
+                    "• The camera uses a different naming structure\n\n"
+                    "Try running as administrator or check if the camera is properly connected."
                 )
-                self.statusBar().showMessage("Error renaming")
+
+    def update_camera_name_in_registry_with_paths(self, camera: CameraDevice, new_name: str, registry_paths: List[str]) -> bool:
+        """Updates the camera name in the registry using provided paths"""
+        try:
+            # Create backup before making changes
+            self.statusBar().showMessage("Creating backup...")
+            backup_path = self.create_registry_backup(camera, registry_paths)
+
+            success_count = 0
+            total_paths = len(registry_paths)
+
+            # Update each registry path
+            for i, registry_path in enumerate(registry_paths):
+                self.statusBar().showMessage(f"Updating registry {i+1}/{total_paths}...")
+
+                try:
+                    # Try direct registry access first
+                    with winreg.OpenKey(
+                            winreg.HKEY_LOCAL_MACHINE,
+                            registry_path,
+                            0,
+                            winreg.KEY_SET_VALUE | winreg.KEY_WOW64_64KEY
+                    ) as key:
+                        # Set FriendlyName
+                        winreg.SetValueEx(key, "FriendlyName", 0, winreg.REG_SZ, new_name)
+                        success_count += 1
+
+                except (FileNotFoundError, PermissionError, OSError):
+                    # Try with PowerShell as fallback
+                    try:
+                        powershell_cmd = f"""
+                        $regPath = "HKLM:\\{registry_path}"
+                        if (Test-Path $regPath) {{
+                            try {{
+                                Set-ItemProperty -Path $regPath -Name "FriendlyName" -Value "{new_name}" -Force
+                                Write-Output "SUCCESS"
+                            }} catch {{
+                                Write-Output "ERROR: $($_.Exception.Message)"
+                            }}
+                        }} else {{
+                            Write-Output "PATH_NOT_FOUND"
+                        }}
+                        """
+
+                        result = subprocess.run(
+                            ["powershell", "-ExecutionPolicy", "Bypass", "-Command", powershell_cmd],
+                            capture_output=True,
+                            text=True,
+                            encoding='utf-8',
+                            errors='replace',
+                            timeout=5
+                        )
+
+                        if result.returncode == 0 and "SUCCESS" in result.stdout:
+                            success_count += 1
+
+                    except Exception:
+                        continue
+
+            # Show backup information if successful
+            if success_count > 0 and backup_path:
+                QMessageBox.information(
+                    self, "✅ Success with Backup",
+                    f"Camera was successfully renamed to '{new_name}'!\n\n"
+                    f"Updated {success_count} of {total_paths} registry locations.\n\n"
+                    f"💾 Backup created: {os.path.basename(backup_path)}\n"
+                    f"📁 Backup folder: {os.path.dirname(backup_path)}\n\n"
+                    "💡 A system restart may be required for the changes "
+                    "to take effect in all applications."
+                )
+            elif success_count > 0:
+                QMessageBox.information(
+                    self, "✅ Partial Success",
+                    f"Camera was partially renamed to '{new_name}'!\n\n"
+                    f"Updated {success_count} of {total_paths} registry locations.\n\n"
+                    "💡 A system restart may be required for the changes "
+                    "to take effect in all applications."
+                )
+
+            return success_count > 0
+
+        except Exception as e:
+            print(f"Error during registry update: {e}")
+            return False
 
     def create_backup_folder(self):
         """Creates the backup folder if it doesn't exist"""
@@ -1294,277 +1928,10 @@ class CamRenamerMainWindow(QMainWindow):
             print(f"Error creating backup: {e}")
             return ""
 
-    def find_all_camera_registry_paths(self, camera: CameraDevice) -> List[str]:
-        """Finds all registry paths for the camera including all Control entries"""
-        registry_paths = []
-
-        # Standard device path
-        device_path = f"SYSTEM\\CurrentControlSet\\Enum\\{camera.device_id}"
-        registry_paths.append(device_path)
-
-        # Search for ALL entries in Control using PowerShell
-        powershell_cmd = f"""
-        [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-        $deviceID = "{camera.device_id}"
-        $hardwareID = "{camera.hardware_id}"
-        
-        # Extract main parts from hardware ID for broader matching
-        $hwIDParts = @()
-        if ($hardwareID -ne "") {{
-            $hwIDParts += $hardwareID -split '&' | Where-Object {{ $_ -ne "" }}
-            $hwIDParts += ($hardwareID -split '\\\\')[0]  # Get main part before backslash
-        }}
-        
-        # Extract device ID parts for matching
-        $deviceIDParts = @()
-        if ($deviceID -ne "") {{
-            $deviceIDParts += $deviceID -split '\\\\' | Where-Object {{ $_ -ne "" }}
-        }}
-        
-        # Extract VID and PID from hardware ID for specific DeviceClasses matching
-        $vidPid = ""
-        if ($hardwareID -match "VID_([0-9A-F]{{4}})&PID_([0-9A-F]{{4}})") {{
-            $vidPid = "VID_$($matches[1])&PID_$($matches[2])"
-        }}
-        
-        $foundPaths = @()
-        
-        # Search in entire Control directory
-        $controlPath = "HKLM:\\SYSTEM\\CurrentControlSet\\Control"
-        if (Test-Path $controlPath) {{
-            try {{
-                # Get all subdirectories in Control
-                $controlSubDirs = Get-ChildItem $controlPath -Recurse -ErrorAction SilentlyContinue | Where-Object {{ $_.PSIsContainer }}
-                
-                foreach ($subDir in $controlSubDirs) {{
-                    $keyPath = $subDir.PSPath
-                    $keyName = $subDir.Name
-                    
-                    # Check if this key contains our device ID or hardware ID
-                    $matchFound = $false
-                    
-                    # Direct device ID match
-                    if ($keyName -like "*$deviceID*") {{
-                        $matchFound = $true
-                    }}
-                    
-                    # Hardware ID parts match
-                    foreach ($hwPart in $hwIDParts) {{
-                        if ($hwPart.Length -gt 3 -and $keyName -like "*$hwPart*") {{
-                            $matchFound = $true
-                            break
-                        }}
-                    }}
-                    
-                    # Device ID parts match  
-                    foreach ($devPart in $deviceIDParts) {{
-                        if ($devPart.Length -gt 3 -and $keyName -like "*$devPart*") {{
-                            $matchFound = $true
-                            break
-                        }}
-                    }}
-                    
-                    # VID/PID match for DeviceClasses
-                    if ($vidPid -ne "" -and $keyName -like "*$vidPid*") {{
-                        $matchFound = $true
-                    }}
-                    
-                    if ($matchFound) {{
-                        $relativePath = $keyName -replace "HKEY_LOCAL_MACHINE\\\\", ""
-                        $foundPaths += $relativePath
-                        
-                        # Also check for common subkeys that might contain FriendlyName
-                        $commonSubKeys = @("Device Parameters", "#GLOBAL", "Properties", "Control")
-                        foreach ($subKeyName in $commonSubKeys) {{
-                            $subKeyPath = Join-Path $keyPath $subKeyName
-                            if (Test-Path $subKeyPath) {{
-                                $relativeSubPath = ($subKeyPath -replace "Microsoft.PowerShell.Core\\\\Registry::", "") -replace "HKEY_LOCAL_MACHINE\\\\", ""
-                                $foundPaths += $relativeSubPath
-                                
-                                # Check Device Parameters under these subkeys too
-                                $deviceParamsPath = Join-Path $subKeyPath "Device Parameters"
-                                if (Test-Path $deviceParamsPath) {{
-                                    $relativeDeviceParams = ($deviceParamsPath -replace "Microsoft.PowerShell.Core\\\\Registry::", "") -replace "HKEY_LOCAL_MACHINE\\\\", ""
-                                    $foundPaths += $relativeDeviceParams
-                                }}
-                            }}
-                        }}
-                    }}
-                }}
-                
-                # SPECIFIC SEARCH for DeviceClasses with ##?# structure
-                Write-Host "Searching specifically for DeviceClasses with ##?# structure..."
-                $deviceClassesPath = "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\DeviceClasses"
-                if (Test-Path $deviceClassesPath) {{
-                    try {{
-                        # Get all GUID folders in DeviceClasses
-                        $guidFolders = Get-ChildItem $deviceClassesPath -ErrorAction SilentlyContinue | Where-Object {{ $_.PSIsContainer }}
-                        
-                        foreach ($guidFolder in $guidFolders) {{
-                            try {{
-                                # Look for subkeys that match our device pattern
-                                $deviceKeys = Get-ChildItem $guidFolder.PSPath -ErrorAction SilentlyContinue | Where-Object {{ $_.PSIsContainer }}
-                                
-                                foreach ($deviceKey in $deviceKeys) {{
-                                    $deviceKeyName = $deviceKey.Name
-                                    $deviceKeyBaseName = Split-Path $deviceKeyName -Leaf
-                                    
-                                    # Check if this device key matches our criteria
-                                    $deviceMatchFound = $false
-                                    
-                                    # Check for VID/PID match in ##?# structure
-                                    if ($vidPid -ne "" -and $deviceKeyBaseName -like "*$vidPid*") {{
-                                        $deviceMatchFound = $true
-                                    }}
-                                    
-                                    # Check for device ID parts in the key name
-                                    foreach ($devPart in $deviceIDParts) {{
-                                        if ($devPart.Length -gt 3 -and $deviceKeyBaseName -like "*$devPart*") {{
-                                            $deviceMatchFound = $true
-                                            break
-                                        }}
-                                    }}
-                                    
-                                    # Check for hardware ID parts
-                                    foreach ($hwPart in $hwIDParts) {{
-                                        if ($hwPart.Length -gt 3 -and $deviceKeyBaseName -like "*$hwPart*") {{
-                                            $deviceMatchFound = $true
-                                            break
-                                        }}
-                                    }}
-                                    
-                                    if ($deviceMatchFound) {{
-                                        Write-Host "Found matching DeviceClass: $deviceKeyName"
-                                        $relativeDeviceKeyPath = $deviceKeyName -replace "HKEY_LOCAL_MACHINE\\\\", ""
-                                        $foundPaths += $relativeDeviceKeyPath
-                                        
-                                        # Check for #GLOBAL subkey
-                                        $globalPath = Join-Path $deviceKey.PSPath "#GLOBAL"
-                                        if (Test-Path $globalPath) {{
-                                            $relativeGlobalPath = ($globalPath -replace "Microsoft.PowerShell.Core\\\\Registry::", "") -replace "HKEY_LOCAL_MACHINE\\\\", ""
-                                            $foundPaths += $relativeGlobalPath
-                                            Write-Host "Found #GLOBAL: $relativeGlobalPath"
-                                            
-                                            # Check Device Parameters under #GLOBAL
-                                            $globalDeviceParams = Join-Path $globalPath "Device Parameters"
-                                            if (Test-Path $globalDeviceParams) {{
-                                                $relativeGlobalDeviceParams = ($globalDeviceParams -replace "Microsoft.PowerShell.Core\\\\Registry::", "") -replace "HKEY_LOCAL_MACHINE\\\\", ""
-                                                $foundPaths += $relativeGlobalDeviceParams
-                                                Write-Host "Found Device Parameters: $relativeGlobalDeviceParams"
-                                            }}
-                                        }}
-                                        
-                                        # Also check for Device Parameters directly under the device key
-                                        $directDeviceParams = Join-Path $deviceKey.PSPath "Device Parameters"
-                                        if (Test-Path $directDeviceParams) {{
-                                            $relativeDirectDeviceParams = ($directDeviceParams -replace "Microsoft.PowerShell.Core\\\\Registry::", "") -replace "HKEY_LOCAL_MACHINE\\\\", ""
-                                            $foundPaths += $relativeDirectDeviceParams
-                                            Write-Host "Found direct Device Parameters: $relativeDirectDeviceParams"
-                                        }}
-                                    }}
-                                }}
-                            }} catch {{
-                                # Continue on access errors for individual GUID folders
-                                Write-Host "Access denied to GUID folder: $($guidFolder.Name)"
-                            }}
-                        }}
-                    }} catch {{
-                        Write-Host "Access denied to DeviceClasses"
-                    }}
-                }}
-                
-                # Also search specifically in known camera-related paths
-                $specificPaths = @(
-                    "Class",
-                    "CoDeviceInstallers", 
-                    "MediaCategories",
-                    "MediaInterfaces",
-                    "MediaResources",
-                    "MediaSets"
-                )
-                
-                foreach ($specificPath in $specificPaths) {{
-                    $fullSpecificPath = Join-Path $controlPath $specificPath
-                    if (Test-Path $fullSpecificPath) {{
-                        try {{
-                            $specificSubDirs = Get-ChildItem $fullSpecificPath -Recurse -ErrorAction SilentlyContinue | Where-Object {{ $_.PSIsContainer }}
-                            
-                            foreach ($specificSubDir in $specificSubDirs) {{
-                                $specificKeyName = $specificSubDir.Name
-                                $specificMatchFound = $false
-                                
-                                # Check device ID match
-                                if ($specificKeyName -like "*$deviceID*") {{
-                                    $specificMatchFound = $true
-                                }}
-                                
-                                # Check VID/PID match
-                                if ($vidPid -ne "" -and $specificKeyName -like "*$vidPid*") {{
-                                    $specificMatchFound = $true
-                                }}
-                                
-                                # Check hardware ID parts match
-                                foreach ($hwPart in $hwIDParts) {{
-                                    if ($hwPart.Length -gt 3 -and $specificKeyName -like "*$hwPart*") {{
-                                        $specificMatchFound = $true
-                                        break
-                                    }}
-                                }}
-                                
-                                if ($specificMatchFound) {{
-                                    $specificRelativePath = $specificKeyName -replace "HKEY_LOCAL_MACHINE\\\\", ""
-                                    $foundPaths += $specificRelativePath
-                                    
-                                    # Check for subkeys
-                                    $specificCommonSubKeys = @("Device Parameters", "#GLOBAL", "Properties")
-                                    foreach ($specificSubKeyName in $specificCommonSubKeys) {{
-                                        $specificSubKeyPath = Join-Path $specificSubDir.PSPath $specificSubKeyName
-                                        if (Test-Path $specificSubKeyPath) {{
-                                            $specificRelativeSubPath = ($specificSubKeyPath -replace "Microsoft.PowerShell.Core\\\\Registry::", "") -replace "HKEY_LOCAL_MACHINE\\\\", ""
-                                            $foundPaths += $specificRelativeSubPath
-                                        }}
-                                    }}
-                                }}
-                            }}
-                        }} catch {{
-                            # Continue on access errors
-                        }}
-                    }}
-                }}
-            }} catch {{
-                # Continue on access errors
-            }}
-        }}
-        
-        # Remove duplicates and output found paths
-        $foundPaths | Select-Object -Unique | ForEach-Object {{ Write-Output $_ }}
-        """
-
-        try:
-            result = subprocess.run(
-                ["powershell", "-ExecutionPolicy", "Bypass", "-Command", powershell_cmd],
-                capture_output=True,
-                text=True,
-                encoding='utf-8',
-                errors='replace',
-                timeout=60  # Increased timeout for more extensive search
-            )
-
-            if result.returncode == 0 and result.stdout.strip():
-                for line in result.stdout.strip().split('\n'):
-                    path = line.strip()
-                    if path and path not in registry_paths and not path.startswith('Searching') and not path.startswith('Found') and not path.startswith('Access denied'):
-                        registry_paths.append(path)
-
-        except Exception as e:
-            print(f"Error searching Control registry: {e}")
-
-        return registry_paths
-
     def update_camera_name_in_registry(self, camera: CameraDevice, new_name: str) -> bool:
         """Updates the camera name in the registry with optimized threaded search"""
         try:
-            # Use the optimized registry search thread
+            # Use the optimized registry search thread for backwards compatibility
             registry_search = RegistrySearchThread(camera)
             registry_paths = []
 
@@ -1583,82 +1950,8 @@ class CamRenamerMainWindow(QMainWindow):
             if not registry_paths:
                 return False
 
-            # Create backup before making changes
-            self.statusBar().showMessage("Creating backup...")
-            backup_path = self.create_registry_backup(camera, registry_paths)
-
-            success_count = 0
-            total_paths = len(registry_paths)
-
-            # Update each registry path
-            for i, registry_path in enumerate(registry_paths):
-                self.statusBar().showMessage(f"Updating registry {i+1}/{total_paths}...")
-
-                try:
-                    # Try direct registry access first
-                    with winreg.OpenKey(
-                            winreg.HKEY_LOCAL_MACHINE,
-                            registry_path,
-                            0,
-                            winreg.KEY_SET_VALUE | winreg.KEY_WOW64_64KEY
-                    ) as key:
-                        # Set FriendlyName
-                        winreg.SetValueEx(key, "FriendlyName", 0, winreg.REG_SZ, new_name)
-                        success_count += 1
-
-                except (FileNotFoundError, PermissionError, OSError):
-                    # Try with PowerShell as fallback
-                    try:
-                        powershell_cmd = f"""
-                        $regPath = "HKLM:\\{registry_path}"
-                        if (Test-Path $regPath) {{
-                            try {{
-                                Set-ItemProperty -Path $regPath -Name "FriendlyName" -Value "{new_name}" -Force
-                                Write-Output "SUCCESS"
-                            }} catch {{
-                                Write-Output "ERROR: $($_.Exception.Message)"
-                            }}
-                        }} else {{
-                            Write-Output "PATH_NOT_FOUND"
-                        }}
-                        """
-
-                        result = subprocess.run(
-                            ["powershell", "-ExecutionPolicy", "Bypass", "-Command", powershell_cmd],
-                            capture_output=True,
-                            text=True,
-                            encoding='utf-8',
-                            errors='replace',
-                            timeout=5  # Reduced timeout
-                        )
-
-                        if result.returncode == 0 and "SUCCESS" in result.stdout:
-                            success_count += 1
-
-                    except Exception:
-                        continue
-
-            # Show backup information if successful
-            if success_count > 0 and backup_path:
-                QMessageBox.information(
-                    self, "✅ Success with Backup",
-                    f"Camera was successfully renamed to '{new_name}'!\n\n"
-                    f"Updated {success_count} of {total_paths} registry locations.\n\n"
-                    f"💾 Backup created: {os.path.basename(backup_path)}\n"
-                    f"📁 Backup folder: {os.path.dirname(backup_path)}\n\n"
-                    "💡 A system restart may be required for the changes "
-                    "to take effect in all applications."
-                )
-            elif success_count > 0:
-                QMessageBox.information(
-                    self, "✅ Partial Success",
-                    f"Camera was partially renamed to '{new_name}'!\n\n"
-                    f"Updated {success_count} of {total_paths} registry locations.\n\n"
-                    "💡 A system restart may be required for the changes "
-                    "to take effect in all applications."
-                )
-
-            return success_count > 0
+            # Use the new function with found paths
+            return self.update_camera_name_in_registry_with_paths(camera, new_name, registry_paths)
 
         except Exception as e:
             print(f"Error during registry update: {e}")
@@ -1750,3 +2043,4 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
