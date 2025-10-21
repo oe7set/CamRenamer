@@ -3,6 +3,8 @@ import winreg
 import subprocess
 import json
 import time
+import os
+import datetime
 from typing import List, Optional
 from dataclasses import dataclass
 from PySide6.QtWidgets import (
@@ -1069,12 +1071,7 @@ class CamRenamerMainWindow(QMainWindow):
             self.setEnabled(True)
 
             if success:
-                QMessageBox.information(
-                    self, "✅ Success",
-                    f"Camera was successfully renamed to '{new_name}'!\n\n"
-                    "💡 A system restart may be required for the changes "
-                    "to take effect in all applications."
-                )
+                # Success message is now handled in update_camera_name_in_registry
                 # Update table
                 camera.friendly_name = new_name
                 camera.name = new_name
@@ -1093,20 +1090,174 @@ class CamRenamerMainWindow(QMainWindow):
                 )
                 self.statusBar().showMessage("Error renaming")
 
-    def update_camera_name_in_registry(self, camera: CameraDevice, new_name: str) -> bool:
-        """Updates the camera name in the registry"""
+    def create_backup_folder(self):
+        """Creates the backup folder if it doesn't exist"""
+        backup_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "CamRenamer_Backups")
+        os.makedirs(backup_folder, exist_ok=True)
+        return backup_folder
+
+    def create_registry_backup(self, camera: CameraDevice, registry_paths: List[str]) -> str:
+        """Creates a backup .reg file for the camera registry entries"""
         try:
-            # Try multiple possible registry paths
-            possible_keys = [
-                f"SYSTEM\\CurrentControlSet\\Enum\\{camera.device_id}",
-                f"SYSTEM\\CurrentControlSet\\Control\\DeviceClasses\\{{6994AD05-93EF-11D0-A3CC-00A0C9223196}}\\#{camera.device_id}#{{6994AD05-93EF-11D0-A3CC-00A0C9223196}}\\Control",
-            ]
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            safe_device_id = camera.device_id.replace("\\", "_").replace("/", "_").replace(":", "_")
+            safe_hardware_id = camera.hardware_id[:20].replace("\\", "_").replace("/", "_").replace(":", "_") if camera.hardware_id else "unknown"
 
-            success = False
+            backup_filename = f"CamRenamer_Backup_{safe_hardware_id}_{safe_device_id}_{timestamp}.reg"
+            backup_folder = self.create_backup_folder()
+            backup_path = os.path.join(backup_folder, backup_filename)
 
-            for registry_path in possible_keys:
+            with open(backup_path, 'w', encoding='utf-16le') as f:
+                # Write REG file header
+                f.write('\ufeffWindows Registry Editor Version 5.00\n\n')
+                f.write(f'; CamRenamer Backup created on {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\n')
+                f.write(f'; Camera: {camera.friendly_name}\n')
+                f.write(f'; Device ID: {camera.device_id}\n')
+                f.write(f'; Hardware ID: {camera.hardware_id}\n\n')
+
+                # Export each registry path
+                for reg_path in registry_paths:
+                    try:
+                        # Use reg export command to get the current values
+                        export_cmd = f'reg export "HKLM\\{reg_path}" - /y'
+                        result = subprocess.run(
+                            export_cmd,
+                            shell=True,
+                            capture_output=True,
+                            text=True,
+                            encoding='utf-16le',
+                            errors='replace'
+                        )
+
+                        if result.returncode == 0 and result.stdout:
+                            # Skip the header from reg export and add our own comment
+                            lines = result.stdout.split('\n')
+                            f.write(f'; Registry path: {reg_path}\n')
+                            for line in lines[1:]:  # Skip first line (header)
+                                if line.strip():
+                                    f.write(line + '\n')
+                            f.write('\n')
+                    except Exception as e:
+                        f.write(f'; Error exporting {reg_path}: {str(e)}\n\n')
+
+            return backup_path
+        except Exception as e:
+            print(f"Error creating backup: {e}")
+            return ""
+
+    def find_all_camera_registry_paths(self, camera: CameraDevice) -> List[str]:
+        """Finds all registry paths for the camera including DeviceClasses"""
+        registry_paths = []
+
+        # Standard device path
+        device_path = f"SYSTEM\\CurrentControlSet\\Enum\\{camera.device_id}"
+        registry_paths.append(device_path)
+
+        # Search for DeviceClasses entries using PowerShell
+        powershell_cmd = f"""
+        [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+        $deviceID = "{camera.device_id}"
+        $hardwareID = "{camera.hardware_id}"
+        
+        # Common camera device class GUIDs
+        $cameraGUIDs = @(
+            "{{6994AD05-93EF-11D0-A3CC-00A0C9223196}}",  # Camera/Image devices
+            "{{65E8773D-8F56-11D0-A3B9-00A0C9223196}}",  # HID devices
+            "{{4D36E96C-E325-11CE-BFC1-08002BE10318}}",  # Sound, video and game controllers
+            "{{6BDD1FC6-810F-11D0-BEC7-08002BE2092F}}",   # USB devices
+            "{{65e8773d-8f56-11d0-a3b9-00a0c9223196}}",   # Imaging devices
+            "{{e5323777-f976-4f5b-9b55-b94699c46e44}}"   # Video capture
+        )
+        
+        $foundPaths = @()
+        
+        foreach ($guid in $cameraGUIDs) {{
+            $basePath = "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\DeviceClasses\\$guid"
+            if (Test-Path $basePath) {{
+                try {{
+                    $subKeys = Get-ChildItem $basePath -ErrorAction SilentlyContinue
+                    foreach ($subKey in $subKeys) {{
+                        $keyName = $subKey.Name
+                        if ($keyName -like "*$deviceID*" -or $keyName -like "*$(($hardwareID -split '&')[0])*") {{
+                            $relativePath = $keyName -replace "HKEY_LOCAL_MACHINE\\\\", ""
+                            $foundPaths += $relativePath
+
+                            # Also check for Device Parameters subkey
+                            $deviceParamsPath = Join-Path $keyName "Device Parameters"
+                            if (Test-Path $deviceParamsPath) {{
+                                $relativeParamsPath = $deviceParamsPath -replace "HKEY_LOCAL_MACHINE\\\\", ""
+                                $foundPaths += $relativeParamsPath
+                            }}
+
+                            # Check for #GLOBAL subkey
+                            $globalPath = Join-Path $keyName "#GLOBAL"
+                            if (Test-Path $globalPath) {{
+                                $relativeGlobalPath = $globalPath -replace "HKEY_LOCAL_MACHINE\\\\", ""
+                                $foundPaths += $relativeGlobalPath
+                                
+                                # Check Device Parameters under #GLOBAL
+                                $globalDeviceParams = Join-Path $globalPath "Device Parameters"
+                                if (Test-Path $globalDeviceParams) {{
+                                    $relativeGlobalDeviceParams = $globalDeviceParams -replace "HKEY_LOCAL_MACHINE\\\\", ""
+                                    $foundPaths += $relativeGlobalDeviceParams
+                                }}
+                            }}
+                        }}
+                    }}
+                }} catch {{
+                    # Ignore access errors
+                }}
+            }}
+        }}
+        
+        # Output found paths
+        $foundPaths | ForEach-Object {{ Write-Output $_ }}
+        """
+
+        try:
+            result = subprocess.run(
+                ["powershell", "-ExecutionPolicy", "Bypass", "-Command", powershell_cmd],
+                capture_output=True,
+                text=True,
+                encoding='utf-8',
+                errors='replace',
+                timeout=30
+            )
+
+            if result.returncode == 0 and result.stdout.strip():
+                for line in result.stdout.strip().split('\n'):
+                    path = line.strip()
+                    if path and path not in registry_paths:
+                        registry_paths.append(path)
+
+        except Exception as e:
+            print(f"Error searching DeviceClasses: {e}")
+
+        return registry_paths
+
+    def update_camera_name_in_registry(self, camera: CameraDevice, new_name: str) -> bool:
+        """Updates the camera name in the registry with backup creation"""
+        try:
+            # Find all registry paths for this camera
+            self.statusBar().showMessage("Searching for registry entries...")
+            registry_paths = self.find_all_camera_registry_paths(camera)
+
+            if not registry_paths:
+                return False
+
+            # Create backup before making changes
+            self.statusBar().showMessage("Creating backup...")
+            backup_path = self.create_registry_backup(camera, registry_paths)
+
+            success_count = 0
+            total_paths = len(registry_paths)
+
+            # Update each registry path
+            for i, registry_path in enumerate(registry_paths):
+                self.statusBar().showMessage(f"Updating registry {i+1}/{total_paths}...")
+
                 try:
-                    # Open registry key
+                    # Try direct registry access first
                     with winreg.OpenKey(
                             winreg.HKEY_LOCAL_MACHINE,
                             registry_path,
@@ -1115,46 +1266,61 @@ class CamRenamerMainWindow(QMainWindow):
                     ) as key:
                         # Set FriendlyName
                         winreg.SetValueEx(key, "FriendlyName", 0, winreg.REG_SZ, new_name)
-                        success = True
-                        break
+                        success_count += 1
 
                 except (FileNotFoundError, PermissionError, OSError):
-                    continue
+                    # Try with PowerShell as fallback
+                    try:
+                        powershell_cmd = f"""
+                        $regPath = "HKLM:\\{registry_path}"
+                        if (Test-Path $regPath) {{
+                            try {{
+                                Set-ItemProperty -Path $regPath -Name "FriendlyName" -Value "{new_name}" -Force
+                                Write-Output "SUCCESS"
+                            }} catch {{
+                                Write-Output "ERROR: $($_.Exception.Message)"
+                            }}
+                        }} else {{
+                            Write-Output "PATH_NOT_FOUND"
+                        }}
+                        """
 
-            # If direct registry change fails, use PowerShell
-            if not success:
-                powershell_cmd = f"""
-                [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-                $deviceID = "{camera.device_id}"
-                $newName = "{new_name}"
+                        result = subprocess.run(
+                            ["powershell", "-ExecutionPolicy", "Bypass", "-Command", powershell_cmd],
+                            capture_output=True,
+                            text=True,
+                            encoding='utf-8',
+                            errors='replace',
+                            timeout=10
+                        )
 
-                # Try registry update via PowerShell
-                try {{
-                    $regPath = "HKLM:\\SYSTEM\\CurrentControlSet\\Enum\\$deviceID"
-                    if (Test-Path $regPath) {{
-                        Set-ItemProperty -Path $regPath -Name "FriendlyName" -Value $newName -Force
-                        Write-Output "SUCCESS"
-                    }} else {{
-                        Write-Output "PATH_NOT_FOUND"
-                    }}
-                }} catch {{
-                    Write-Output "ERROR: $($_.Exception.Message)"
-                }}
-                """
+                        if result.returncode == 0 and "SUCCESS" in result.stdout:
+                            success_count += 1
 
-                result = subprocess.run(
-                    ["powershell", "-ExecutionPolicy", "Bypass", "-Command", powershell_cmd],
-                    capture_output=True,
-                    text=True,
-                    encoding='utf-8',
-                    errors='replace',
-                    timeout=15
+                    except Exception:
+                        continue
+
+            # Show backup information if successful
+            if success_count > 0 and backup_path:
+                QMessageBox.information(
+                    self, "✅ Success with Backup",
+                    f"Camera was successfully renamed to '{new_name}'!\n\n"
+                    f"Updated {success_count} of {total_paths} registry locations.\n\n"
+                    f"💾 Backup created: {os.path.basename(backup_path)}\n"
+                    f"📁 Backup folder: {os.path.dirname(backup_path)}\n\n"
+                    "💡 A system restart may be required for the changes "
+                    "to take effect in all applications."
+                )
+            elif success_count > 0:
+                QMessageBox.information(
+                    self, "✅ Partial Success",
+                    f"Camera was partially renamed to '{new_name}'!\n\n"
+                    f"Updated {success_count} of {total_paths} registry locations.\n\n"
+                    "💡 A system restart may be required for the changes "
+                    "to take effect in all applications."
                 )
 
-                if result.returncode == 0 and "SUCCESS" in result.stdout:
-                    success = True
-
-            return success
+            return success_count > 0
 
         except subprocess.TimeoutExpired:
             print("Timeout during registry update")
