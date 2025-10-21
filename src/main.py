@@ -31,8 +31,9 @@ class CameraDevice:
 class RegistrySearchDialog(QDialog):
     """Dialog to show registry search progress"""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, search_options=None):
         super().__init__(parent)
+        self.search_options = search_options or {}
         self.setWindowTitle("Registry Search Progress")
         self.setFixedSize(600, 400)
         self.setModal(True)
@@ -61,12 +62,19 @@ class RegistrySearchDialog(QDialog):
         layout.addWidget(self.results_text)
 
         # Close button
-        self.close_button = QPushButton("Close")
+        self.close_button = QPushButton("OK")
         self.close_button.clicked.connect(self.accept)
         self.close_button.setEnabled(False)  # Disabled until search completes
         layout.addWidget(self.close_button)
 
         self.setLayout(layout)
+
+        # Auto-close timer setup
+        self.auto_close_timer = QTimer()
+        self.auto_close_timer.timeout.connect(self.accept)
+        self.countdown_timer = QTimer()
+        self.countdown_timer.timeout.connect(self.update_countdown)
+        self.countdown_seconds = 5
 
     def update_progress(self, value, status):
         """Update progress bar and status"""
@@ -82,6 +90,24 @@ class RegistrySearchDialog(QDialog):
         self.close_button.setEnabled(True)
         self.status_label.setText("Search completed!")
 
+        # Check if auto-close is enabled
+        if self.search_options.get("skip_next_btn", False):
+            self.start_auto_close()
+
+    def start_auto_close(self):
+        """Start the auto-close countdown"""
+        self.countdown_seconds = 5
+        self.update_countdown()
+        self.countdown_timer.start(1000)  # Update every second
+        self.auto_close_timer.start(5000)  # Close after 5 seconds
+
+    def update_countdown(self):
+        """Update the countdown display"""
+        if self.countdown_seconds > 0:
+            self.close_button.setText(f"OK (auto-close in {self.countdown_seconds}s)")
+            self.countdown_seconds -= 1
+        else:
+            self.countdown_timer.stop()
 
 class EnhancedRegistrySearchThread(QThread):
     """Enhanced thread for comprehensive registry search"""
@@ -97,14 +123,16 @@ class EnhancedRegistrySearchThread(QThread):
     def load_default_search_options(self):
         """Load search options from settings or return defaults"""
         defaults = {
+            "device_manager_friendly_name": True,
             "standard_device_paths": True,
-            "device_classes": True,
-            "usb_interfaces": True,
+            "device_classes": False,
+            "usb_interfaces": False,
             "system_drivers": False,
             "control_entries": False,
             "powershell_extended": False,
             "vid_pid_matching": True,
-            "friendly_name_search": True
+            "friendly_name_search": False,
+            "skip_next_btn": True
         }
 
         try:
@@ -143,11 +171,21 @@ class EnhancedRegistrySearchThread(QThread):
         else:
             self.result_found.emit("⏭️ VID/PID matching: Disabled (skipped)")
 
+        # Step 0: Device Manager FriendlyName search
+        if self.search_options.get("device_manager_friendly_name", True):
+            progress += step_increment
+            self.progress_updated.emit(int(progress), "Searching Device Manager FriendlyName entries...")
+            dm_paths = self.search_device_manager_friendly_name(self.camera)
+            registry_paths.extend(dm_paths)
+        else:
+            self.result_found.emit("⏭️ Device Manager FriendlyName: Disabled (skipped)")
 
+
+        # Step 1: Standard device ID paths
         if self.search_options.get("standard_device_paths", True):
             progress += step_increment
             self.progress_updated.emit(int(progress), "Searching standard device paths...")
-            standard_paths = self.search_standard_device_paths()
+            standard_paths = self.search_standard_device_paths(self.camera.device_id.replace("\\", "#"))
             registry_paths.extend(standard_paths)
         else:
             self.result_found.emit("⏭️ Standard Device Paths: Disabled (skipped)")
@@ -221,6 +259,7 @@ class EnhancedRegistrySearchThread(QThread):
         self.result_found.emit(f"✅ Found {len(valid_paths)} unique registry paths")
 
         for path in valid_paths:
+            print(path)
             self.result_found.emit(f"📝 {path}")
 
         self.progress_updated.emit(100, "Search completed!")
@@ -237,22 +276,85 @@ class EnhancedRegistrySearchThread(QThread):
             return f"VID_{match.group(1)}&PID_{match.group(2)}"
         return ""
 
-    def search_standard_device_paths(self) -> List[str]:
+    def search_standard_device_paths(self, device_id) -> List[str]:
+        """Search for registry paths containing FriendlyName entries"""
+        if not device_id:
+            return []
+
+        powershell_cmd = f"""
+        [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+        $vidPid = "{device_id}"
+        $foundPaths = @()
+
+        # Comprehensive Device Classes search
+        $deviceClassesPath = "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\DeviceClasses"
+
+        # Extended list of relevant GUIDs for cameras and multimedia devices
+        $relevantGUIDs = @(
+            "{{65e8773d-8f56-11d0-a3b9-00a0c9223196}}",  # Image devices
+            "{{e5323777-f976-4f5b-9b55-b94699c46e44}}",  # Camera devices
+            "{{6994AD05-93EF-11D0-A3CC-00A0C9223196}}",  # Image class
+            "{{4D36E96C-E325-11CE-BFC1-08002BE10318}}",  # Sound/Video devices
+            "{{6bdd1fc6-810f-11d0-bec7-08002be2092f}}",  # USB devices
+            "{{4d36e972-e325-11ce-bfc1-08002be10318}}",  # Multimedia devices
+            "{{c06ff265-ae09-48f0-812c-16753d7cba83}}",  # WDM streaming devices
+            "{{6994ad04-93ef-11d0-a3cc-00a0c9223196}}"   # Still image devices
+        )
+
+        foreach ($guid in $relevantGUIDs) {{
+            $guidPath = Join-Path $deviceClassesPath $guid
+            if (Test-Path $guidPath) {{
+                try {{
+                    $subKeys = Get-ChildItem $guidPath -ErrorAction SilentlyContinue
+                    foreach ($subKey in $subKeys) {{
+                        if ($subKey.Name -like "*$vidPid*") {{
+                            $relativePath = $subKey.Name -replace "HKEY_LOCAL_MACHINE\\\\", ""
+
+                            # Check specifically for #GLOBAL\Device Parameters path with FriendlyName
+                            $friendlyNamePath = Join-Path $subKey.PSPath "#GLOBAL\\Device Parameters"
+                            if (Test-Path $friendlyNamePath) {{
+                                try {{
+                                    $friendlyNameValue = Get-ItemProperty -Path $friendlyNamePath -Name "FriendlyName" -ErrorAction SilentlyContinue
+                                    if ($friendlyNameValue -and $friendlyNameValue.FriendlyName) {{
+                                        $foundPaths += "$relativePath\\#GLOBAL\\Device Parameters"
+                                    }}
+                                }} catch {{
+                                    # Continue if FriendlyName property doesn't exist
+                                }}
+                            }}
+                        }}
+                    }}
+                }} catch {{
+                    # Continue on access errors
+                }}
+            }}
+        }}
+
+        $foundPaths | Where-Object {{$_ -ne ""}} | ForEach-Object {{ Write-Output $_ }}
+        """
+
+        paths = self.execute_powershell(powershell_cmd)
+        self.result_found.emit(f"🎯 Found {len(paths)} registry paths with FriendlyName")
+        return paths
+
+    def search_device_manager_friendly_name(self, camera: CameraDevice) -> List[str]:
         """Search standard device enumeration paths"""
         paths = []
-
+        # use fixed standard path
         # Standard enumeration path
         base_path = f"SYSTEM\\CurrentControlSet\\Enum\\{self.camera.device_id}"
         paths.append(base_path)
 
         # Add Device Parameters subkey
-        paths.append(f"{base_path}\\Device Parameters")
+        # paths.append(f"{base_path}\\Device Parameters")
 
         # Add LogConf subkey
-        paths.append(f"{base_path}\\LogConf")
+        # paths.append(f"{base_path}\\LogConf")
 
-        self.result_found.emit(f"📂 Added {len(paths)} standard device paths")
+        self.result_found.emit(f"📂 Added {len(paths)} Device Manager FriendlyName entries")
         return paths
+
+
 
     def search_device_classes(self, vid_pid: str) -> List[str]:
         """Search in Device Classes registry"""
@@ -263,22 +365,22 @@ class EnhancedRegistrySearchThread(QThread):
         [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
         $vidPid = "{vid_pid}"
         $foundPaths = @()
-        
+
         # Comprehensive Device Classes search
         $deviceClassesPath = "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\DeviceClasses"
-        
+
         # Extended list of relevant GUIDs for cameras and multimedia devices
         $relevantGUIDs = @(
-            "65e8773d-8f56-11d0-a3b9-00a0c9223196",  # Image devices
-            "e5323777-f976-4f5b-9b55-b94699c46e44",  # Camera devices
-            "6994AD05-93EF-11D0-A3CC-00A0C9223196",  # Image class
-            "4D36E96C-E325-11CE-BFC1-08002BE10318",  # Sound/Video devices
-            "6bdd1fc6-810f-11d0-bec7-08002be2092f",  # USB devices
-            "4d36e972-e325-11ce-bfc1-08002be10318",  # Multimedia devices
-            "c06ff265-ae09-48f0-812c-16753d7cba83",  # WDM streaming devices
-            "6994ad04-93ef-11d0-a3cc-00a0c9223196"   # Still image devices
+            "{{65e8773d-8f56-11d0-a3b9-00a0c9223196}}",  # Image devices
+            "{{e5323777-f976-4f5b-9b55-b94699c46e44}}",  # Camera devices
+            "{{6994AD05-93EF-11D0-A3CC-00A0C9223196}}",  # Image class
+            "{{4D36E96C-E325-11CE-BFC1-08002BE10318}}",  # Sound/Video devices
+            "{{6bdd1fc6-810f-11d0-bec7-08002be2092f}}",  # USB devices
+            "{{4d36e972-e325-11ce-bfc1-08002be10318}}",  # Multimedia devices
+            "{{c06ff265-ae09-48f0-812c-16753d7cba83}}",  # WDM streaming devices
+            "{{6994ad04-93ef-11d0-a3cc-00a0c9223196}}"   # Still image devices
         )
-        
+
         foreach ($guid in $relevantGUIDs) {{
             $guidPath = Join-Path $deviceClassesPath $guid
             if (Test-Path $guidPath) {{
@@ -288,7 +390,7 @@ class EnhancedRegistrySearchThread(QThread):
                         if ($subKey.Name -like "*$vidPid*") {{
                             $relativePath = $subKey.Name -replace "HKEY_LOCAL_MACHINE\\\\", ""
                             $foundPaths += $relativePath
-                            
+
                             # Check for nested paths
                             $nestedPaths = @("#GLOBAL", "Control", "Device Parameters")
                             foreach ($nested in $nestedPaths) {{
@@ -304,7 +406,7 @@ class EnhancedRegistrySearchThread(QThread):
                 }}
             }}
         }}
-        
+
         $foundPaths | Where-Object {{$_ -ne ""}} | ForEach-Object {{ Write-Output $_ }}
         """
 
@@ -1628,12 +1730,56 @@ class CamRenamerMainWindow(QMainWindow):
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
 
+        # Visual progress timer for smooth animation
+        self.visual_progress = 0
+        self.scan_completed = False
+
+        self.visual_timer = QTimer()
+        self.visual_timer.timeout.connect(self.update_visual_progress)
+        self.visual_timer.start(100)  # Update every 100ms
+
         self.scanner_thread = CameraScanner()
         self.scanner_thread.cameras_found.connect(self.on_cameras_found)
         self.scanner_thread.progress_updated.connect(self.progress_bar.setValue)
         self.scanner_thread.status_updated.connect(self.statusBar().showMessage)
         self.scanner_thread.finished.connect(self.on_scan_finished)
         self.scanner_thread.start()
+
+    def update_visual_progress(self):
+        """Updates visual progress with smooth animation"""
+        if self.scan_completed:
+            # Fast completion when scan is done
+            if self.visual_progress < 100:
+                self.visual_progress = min(100, self.visual_progress + 10)
+                self.progress_bar.setValue(self.visual_progress)
+            else:
+                self.visual_timer.stop()
+            return
+
+        # Normal progress animation
+        if self.visual_progress < 90:
+            # Fast progress until 90%
+            self.visual_progress = min(90, self.visual_progress + 2.2)
+        else:
+            # Slower progress after 90%
+            if self.visual_progress < 98:
+                self.visual_progress = min(98, self.visual_progress + 0.2)
+
+        self.progress_bar.setValue(int(self.visual_progress))
+
+    def on_real_progress_updated(self, value):
+        """Handle real progress updates from scanner thread"""
+        # Optional: sync visual progress with real progress if needed
+        if value > self.visual_progress:
+            self.visual_progress = min(value, 98)
+
+    def on_scan_finished(self):
+        """Called when the scan is finished"""
+        self.scan_completed = True
+        self.scan_button.setEnabled(True)
+
+        # Hide progress bar after completion animation
+        QTimer.singleShot(500, lambda: self.progress_bar.setVisible(False))
 
     def on_scan_finished(self):
         """Called when the scan is finished"""
@@ -1720,10 +1866,11 @@ class CamRenamerMainWindow(QMainWindow):
 
         if reply == QMessageBox.StandardButton.Yes:
             # Show registry search dialog
-            search_dialog = RegistrySearchDialog(self)
+            # search_dialog = RegistrySearchDialog(self)
 
             # Create and setup the enhanced registry search thread
             registry_search = EnhancedRegistrySearchThread(camera)
+            search_dialog = RegistrySearchDialog(self, registry_search.search_options)
             registry_paths = []
 
             # Connect signals to the dialog
@@ -1880,48 +2027,106 @@ class CamRenamerMainWindow(QMainWindow):
         return backup_folder
 
     def create_registry_backup(self, camera: CameraDevice, registry_paths: List[str]) -> str:
-        """Creates a backup .reg file for the camera registry entries"""
+        """Creates a backup .reg file for the camera registry entries - optimized version"""
         try:
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             safe_device_id = camera.device_id.replace("\\", "_").replace("/", "_").replace(":", "_")
-            safe_hardware_id = camera.hardware_id[:20].replace("\\", "_").replace("/", "_").replace(":", "_") if camera.hardware_id else "unknown"
+            safe_hardware_id = camera.hardware_id[:20].replace("\\", "_").replace("/", "_").replace(":",
+                                                                                                    "_") if camera.hardware_id else "unknown"
 
             backup_filename = f"CamRenamer_Backup_{safe_hardware_id}_{safe_device_id}_{timestamp}.reg"
             backup_folder = self.create_backup_folder()
             backup_path = os.path.join(backup_folder, backup_filename)
 
+            # Create single PowerShell script that processes all paths at once
+            paths_array = "', '".join([path.replace('"', '').strip() for path in registry_paths])
+
+            powershell_cmd = f"""
+            $paths = @('{paths_array}')
+
+            foreach ($regPath in $paths) {{
+                $fullPath = "HKLM:\\$regPath"
+                if (Test-Path $fullPath) {{
+                    try {{
+                        $key = Get-Item $fullPath -ErrorAction SilentlyContinue
+                        if ($key) {{
+                            Write-Output "[HKEY_LOCAL_MACHINE\\$regPath]"
+
+                            $key.GetValueNames() | ForEach-Object {{
+                                $valueName = $_
+                                $value = $key.GetValue($valueName)
+                                $valueType = $key.GetValueKind($valueName)
+
+                                if ($valueName -eq "") {{
+                                    $regValueName = "@"
+                                }} else {{
+                                    $regValueName = "`"$valueName`""
+                                }}
+
+                                switch ($valueType) {{
+                                    "String" {{
+                                        $escapedValue = $value -replace '\\\\', '\\\\\\\\' -replace '"', '\\"'
+                                        Write-Output "$regValueName=`"$escapedValue`""
+                                    }}
+                                    "DWord" {{
+                                        $hexValue = [System.Convert]::ToString([int]$value, 16).PadLeft(8, '0')
+                                        Write-Output "$regValueName=dword:$hexValue"
+                                    }}
+                                    "QWord" {{
+                                        $hexValue = [System.Convert]::ToString([long]$value, 16).PadLeft(16, '0')
+                                        Write-Output "$regValueName=qword:$hexValue"
+                                    }}
+                                    "Binary" {{
+                                        $hexString = ($value | ForEach-Object {{ [System.Convert]::ToString($_, 16).PadLeft(2, '0') }}) -join ','
+                                        Write-Output "$regValueName=hex:$hexString"
+                                    }}
+                                    "MultiString" {{
+                                        $hexBytes = [System.Text.Encoding]::Unicode.GetBytes(($value -join "`0") + "`0`0")
+                                        $hexString = ($hexBytes | ForEach-Object {{ [System.Convert]::ToString($_, 16).PadLeft(2, '0') }}) -join ','
+                                        Write-Output "$regValueName=hex(7):$hexString"
+                                    }}
+                                    "ExpandString" {{
+                                        $hexBytes = [System.Text.Encoding]::Unicode.GetBytes($value + "`0")
+                                        $hexString = ($hexBytes | ForEach-Object {{ [System.Convert]::ToString($_, 16).PadLeft(2, '0') }}) -join ','
+                                        Write-Output "$regValueName=hex(2):$hexString"
+                                    }}
+                                }}
+                            }}
+                            Write-Output ""
+                        }}
+                    }} catch {{
+                        Write-Output "; Error accessing: $regPath"
+                        Write-Output ""
+                    }}
+                }} else {{
+                    Write-Output "; Registry key not found: $regPath"
+                    Write-Output ""
+                }}
+            }}
+            """
+
+            # Single PowerShell execution for all paths
+            result = subprocess.run(
+                ["powershell", "-ExecutionPolicy", "Bypass", "-Command", powershell_cmd],
+                capture_output=True,
+                text=True,
+                encoding='utf-8',
+                errors='replace',
+                timeout=60
+            )
+
+            # Write to file
             with open(backup_path, 'w', encoding='utf-16le') as f:
-                # Write REG file header
                 f.write('\ufeffWindows Registry Editor Version 5.00\n\n')
                 f.write(f'; CamRenamer Backup created on {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\n')
                 f.write(f'; Camera: {camera.friendly_name}\n')
                 f.write(f'; Device ID: {camera.device_id}\n')
                 f.write(f'; Hardware ID: {camera.hardware_id}\n\n')
 
-                # Export each registry path
-                for reg_path in registry_paths:
-                    try:
-                        # Use reg export command to get the current values
-                        export_cmd = f'reg export "HKLM\\{reg_path}" - /y'
-                        result = subprocess.run(
-                            export_cmd,
-                            shell=True,
-                            capture_output=True,
-                            text=True,
-                            encoding='utf-16le',
-                            errors='replace'
-                        )
-
-                        if result.returncode == 0 and result.stdout:
-                            # Skip the header from reg export and add our own comment
-                            lines = result.stdout.split('\n')
-                            f.write(f'; Registry path: {reg_path}\n')
-                            for line in lines[1:]:  # Skip first line (header)
-                                if line.strip():
-                                    f.write(line + '\n')
-                            f.write('\n')
-                    except Exception as e:
-                        f.write(f'; Error exporting {reg_path}: {str(e)}\n\n')
+                if result.returncode == 0 and result.stdout.strip():
+                    f.write(result.stdout)
+                else:
+                    f.write(f'; Error during backup: {result.stderr}\n')
 
             return backup_path
         except Exception as e:
@@ -2043,4 +2248,13 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+
+
+
+
+
+
+
 
