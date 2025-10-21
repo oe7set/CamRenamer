@@ -28,6 +28,155 @@ class CameraDevice:
     is_connected: bool = True
 
 
+class RegistrySearchThread(QThread):
+    """Thread for searching registry entries without blocking UI"""
+    search_completed = Signal(list)
+    progress_updated = Signal(str)
+
+    def __init__(self, camera: CameraDevice):
+        super().__init__()
+        self.camera = camera
+
+    def run(self):
+        """Search for registry paths in background thread"""
+        try:
+            self.progress_updated.emit("Searching registry entries...")
+            registry_paths = self.find_registry_paths_optimized()
+            self.search_completed.emit(registry_paths)
+        except Exception as e:
+            print(f"Error in registry search thread: {e}")
+            self.search_completed.emit([])
+
+    def find_registry_paths_optimized(self) -> List[str]:
+        """Optimized registry search with faster PowerShell queries"""
+        registry_paths = []
+
+        # Standard device path
+        device_path = f"SYSTEM\\CurrentControlSet\\Enum\\{self.camera.device_id}"
+        registry_paths.append(device_path)
+
+        # Optimized PowerShell search with limited scope
+        powershell_cmd = r"""
+        [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+        $deviceID = "{}"
+        $hardwareID = "{}"
+        
+        # Extract VID and PID for targeted search
+        $vidPid = ""
+        if ($hardwareID -match "VID_([0-9A-F]{{4}})&PID_([0-9A-F]{{4}})") {{
+            $vidPid = "VID_$($matches[1])&PID_$($matches[2])"
+        }}
+        
+        $foundPaths = @()
+        
+        # TARGETED DeviceClasses search - much faster
+        if ($vidPid -ne "") {{
+            $deviceClassesPath = "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\DeviceClasses"
+            
+            # Only search in common camera GUIDs to speed up
+            $cameraGUIDs = @(
+                "{{65e8773d-8f56-11d0-a3b9-00a0c9223196}}",
+                "{{e5323777-f976-4f5b-9b55-b94699c46e44}}",
+                "{{6994AD05-93EF-11D0-A3CC-00A0C9223196}}",
+                "{{4D36E96C-E325-11CE-BFC1-08002BE10318}}"
+            )
+            
+            foreach ($guid in $cameraGUIDs) {{
+                $guidPath = Join-Path $deviceClassesPath $guid
+                if (Test-Path $guidPath) {{
+                    try {{
+                        # Use Get-ChildItem with Name filter for speed
+                        $matchingKeys = Get-ChildItem $guidPath -Name "*$vidPid*" -ErrorAction SilentlyContinue
+                        
+                        foreach ($keyName in $matchingKeys) {{
+                            $fullKeyPath = "SYSTEM\\CurrentControlSet\\Control\\DeviceClasses\\$guid\\$keyName"
+                            $foundPaths += $fullKeyPath
+                            
+                            # Check for #GLOBAL\Device Parameters
+                            $globalDeviceParamsPath = "$guidPath\\$keyName\\#GLOBAL\\Device Parameters"
+                            if (Test-Path $globalDeviceParamsPath) {{
+                                $foundPaths += "$fullKeyPath\\#GLOBAL\\Device Parameters"
+                            }}
+                            
+                            # Check for direct Device Parameters  
+                            $directDeviceParamsPath = "$guidPath\\$keyName\\Device Parameters"
+                            if (Test-Path $directDeviceParamsPath) {{
+                                $foundPaths += "$fullKeyPath\\Device Parameters"
+                            }}
+                        }}
+                    }} catch {{
+                        # Continue on access errors
+                    }}
+                }}
+            }}
+        }}
+        
+        # Quick search in Class registry for device-specific entries
+        $classPath = "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Class"
+        if (Test-Path $classPath) {{
+            try {{
+                # Only search in Image and Media class GUIDs
+                $relevantClasses = @(
+                    "{{6bdd1fc6-810f-11d0-bec7-08002be2092f}}",  # USB
+                    "{{4d36e96c-e325-11ce-bfc1-08002be10318}}",  # Sound/Video
+                    "{{6994ad05-93ef-11d0-a3cc-00a0c9223196}}"   # Image
+                )
+                
+                foreach ($classGuid in $relevantClasses) {{
+                    $classGuidPath = Join-Path $classPath $classGuid
+                    if (Test-Path $classGuidPath) {{
+                        try {{
+                            $classSubKeys = Get-ChildItem $classGuidPath -ErrorAction SilentlyContinue
+                            foreach ($subKey in $classSubKeys) {{
+                                $subKeyPath = $subKey.PSPath
+                                try {{
+                                    $matchingDevicesProp = Get-ItemProperty $subKeyPath -Name "MatchingDeviceId" -ErrorAction SilentlyContinue
+                                    if ($matchingDevicesProp -and $matchingDevicesProp.MatchingDeviceId -like "*$vidPid*") {{
+                                        $relativePath = $subKey.Name -replace "HKEY_LOCAL_MACHINE\\\\", ""
+                                        $foundPaths += $relativePath
+                                    }}
+                                }} catch {{
+                                    # Continue
+                                }}
+                            }}
+                        }} catch {{
+                            # Continue
+                        }}
+                    }}
+                }}
+            }} catch {{
+                # Continue
+            }}
+        }}
+        
+        # Output unique paths
+        $foundPaths | Select-Object -Unique | ForEach-Object {{ Write-Output $_ }}
+        """.format(self.camera.device_id, self.camera.hardware_id)
+
+        try:
+            result = subprocess.run(
+                ["powershell", "-ExecutionPolicy", "Bypass", "-Command", powershell_cmd],
+                capture_output=True,
+                text=True,
+                encoding='utf-8',
+                errors='replace',
+                timeout=15  # Reduced timeout
+            )
+
+            if result.returncode == 0 and result.stdout.strip():
+                for line in result.stdout.strip().split('\n'):
+                    path = line.strip()
+                    if path and path not in registry_paths:
+                        registry_paths.append(path)
+
+        except subprocess.TimeoutExpired:
+            print("Registry search timeout - using fallback")
+        except Exception as e:
+            print(f"Registry search error: {e}")
+
+        return registry_paths
+
+
 class CameraScanner(QThread):
     """Thread for scanning USB cameras"""
     cameras_found = Signal(list)
@@ -1146,72 +1295,249 @@ class CamRenamerMainWindow(QMainWindow):
             return ""
 
     def find_all_camera_registry_paths(self, camera: CameraDevice) -> List[str]:
-        """Finds all registry paths for the camera including DeviceClasses"""
+        """Finds all registry paths for the camera including all Control entries"""
         registry_paths = []
 
         # Standard device path
         device_path = f"SYSTEM\\CurrentControlSet\\Enum\\{camera.device_id}"
         registry_paths.append(device_path)
 
-        # Search for DeviceClasses entries using PowerShell
+        # Search for ALL entries in Control using PowerShell
         powershell_cmd = f"""
         [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
         $deviceID = "{camera.device_id}"
         $hardwareID = "{camera.hardware_id}"
         
-        # Common camera device class GUIDs
-        $cameraGUIDs = @(
-            "{{6994AD05-93EF-11D0-A3CC-00A0C9223196}}",  # Camera/Image devices
-            "{{65E8773D-8F56-11D0-A3B9-00A0C9223196}}",  # HID devices
-            "{{4D36E96C-E325-11CE-BFC1-08002BE10318}}",  # Sound, video and game controllers
-            "{{6BDD1FC6-810F-11D0-BEC7-08002BE2092F}}",   # USB devices
-            "{{65e8773d-8f56-11d0-a3b9-00a0c9223196}}",   # Imaging devices
-            "{{e5323777-f976-4f5b-9b55-b94699c46e44}}"   # Video capture
-        )
+        # Extract main parts from hardware ID for broader matching
+        $hwIDParts = @()
+        if ($hardwareID -ne "") {{
+            $hwIDParts += $hardwareID -split '&' | Where-Object {{ $_ -ne "" }}
+            $hwIDParts += ($hardwareID -split '\\\\')[0]  # Get main part before backslash
+        }}
+        
+        # Extract device ID parts for matching
+        $deviceIDParts = @()
+        if ($deviceID -ne "") {{
+            $deviceIDParts += $deviceID -split '\\\\' | Where-Object {{ $_ -ne "" }}
+        }}
+        
+        # Extract VID and PID from hardware ID for specific DeviceClasses matching
+        $vidPid = ""
+        if ($hardwareID -match "VID_([0-9A-F]{{4}})&PID_([0-9A-F]{{4}})") {{
+            $vidPid = "VID_$($matches[1])&PID_$($matches[2])"
+        }}
         
         $foundPaths = @()
         
-        foreach ($guid in $cameraGUIDs) {{
-            $basePath = "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\DeviceClasses\\$guid"
-            if (Test-Path $basePath) {{
-                try {{
-                    $subKeys = Get-ChildItem $basePath -ErrorAction SilentlyContinue
-                    foreach ($subKey in $subKeys) {{
-                        $keyName = $subKey.Name
-                        if ($keyName -like "*$deviceID*" -or $keyName -like "*$(($hardwareID -split '&')[0])*") {{
-                            $relativePath = $keyName -replace "HKEY_LOCAL_MACHINE\\\\", ""
-                            $foundPaths += $relativePath
-
-                            # Also check for Device Parameters subkey
-                            $deviceParamsPath = Join-Path $keyName "Device Parameters"
-                            if (Test-Path $deviceParamsPath) {{
-                                $relativeParamsPath = $deviceParamsPath -replace "HKEY_LOCAL_MACHINE\\\\", ""
-                                $foundPaths += $relativeParamsPath
-                            }}
-
-                            # Check for #GLOBAL subkey
-                            $globalPath = Join-Path $keyName "#GLOBAL"
-                            if (Test-Path $globalPath) {{
-                                $relativeGlobalPath = $globalPath -replace "HKEY_LOCAL_MACHINE\\\\", ""
-                                $foundPaths += $relativeGlobalPath
+        # Search in entire Control directory
+        $controlPath = "HKLM:\\SYSTEM\\CurrentControlSet\\Control"
+        if (Test-Path $controlPath) {{
+            try {{
+                # Get all subdirectories in Control
+                $controlSubDirs = Get-ChildItem $controlPath -Recurse -ErrorAction SilentlyContinue | Where-Object {{ $_.PSIsContainer }}
+                
+                foreach ($subDir in $controlSubDirs) {{
+                    $keyPath = $subDir.PSPath
+                    $keyName = $subDir.Name
+                    
+                    # Check if this key contains our device ID or hardware ID
+                    $matchFound = $false
+                    
+                    # Direct device ID match
+                    if ($keyName -like "*$deviceID*") {{
+                        $matchFound = $true
+                    }}
+                    
+                    # Hardware ID parts match
+                    foreach ($hwPart in $hwIDParts) {{
+                        if ($hwPart.Length -gt 3 -and $keyName -like "*$hwPart*") {{
+                            $matchFound = $true
+                            break
+                        }}
+                    }}
+                    
+                    # Device ID parts match  
+                    foreach ($devPart in $deviceIDParts) {{
+                        if ($devPart.Length -gt 3 -and $keyName -like "*$devPart*") {{
+                            $matchFound = $true
+                            break
+                        }}
+                    }}
+                    
+                    # VID/PID match for DeviceClasses
+                    if ($vidPid -ne "" -and $keyName -like "*$vidPid*") {{
+                        $matchFound = $true
+                    }}
+                    
+                    if ($matchFound) {{
+                        $relativePath = $keyName -replace "HKEY_LOCAL_MACHINE\\\\", ""
+                        $foundPaths += $relativePath
+                        
+                        # Also check for common subkeys that might contain FriendlyName
+                        $commonSubKeys = @("Device Parameters", "#GLOBAL", "Properties", "Control")
+                        foreach ($subKeyName in $commonSubKeys) {{
+                            $subKeyPath = Join-Path $keyPath $subKeyName
+                            if (Test-Path $subKeyPath) {{
+                                $relativeSubPath = ($subKeyPath -replace "Microsoft.PowerShell.Core\\\\Registry::", "") -replace "HKEY_LOCAL_MACHINE\\\\", ""
+                                $foundPaths += $relativeSubPath
                                 
-                                # Check Device Parameters under #GLOBAL
-                                $globalDeviceParams = Join-Path $globalPath "Device Parameters"
-                                if (Test-Path $globalDeviceParams) {{
-                                    $relativeGlobalDeviceParams = $globalDeviceParams -replace "HKEY_LOCAL_MACHINE\\\\", ""
-                                    $foundPaths += $relativeGlobalDeviceParams
+                                # Check Device Parameters under these subkeys too
+                                $deviceParamsPath = Join-Path $subKeyPath "Device Parameters"
+                                if (Test-Path $deviceParamsPath) {{
+                                    $relativeDeviceParams = ($deviceParamsPath -replace "Microsoft.PowerShell.Core\\\\Registry::", "") -replace "HKEY_LOCAL_MACHINE\\\\", ""
+                                    $foundPaths += $relativeDeviceParams
                                 }}
                             }}
                         }}
                     }}
-                }} catch {{
-                    # Ignore access errors
                 }}
+                
+                # SPECIFIC SEARCH for DeviceClasses with ##?# structure
+                Write-Host "Searching specifically for DeviceClasses with ##?# structure..."
+                $deviceClassesPath = "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\DeviceClasses"
+                if (Test-Path $deviceClassesPath) {{
+                    try {{
+                        # Get all GUID folders in DeviceClasses
+                        $guidFolders = Get-ChildItem $deviceClassesPath -ErrorAction SilentlyContinue | Where-Object {{ $_.PSIsContainer }}
+                        
+                        foreach ($guidFolder in $guidFolders) {{
+                            try {{
+                                # Look for subkeys that match our device pattern
+                                $deviceKeys = Get-ChildItem $guidFolder.PSPath -ErrorAction SilentlyContinue | Where-Object {{ $_.PSIsContainer }}
+                                
+                                foreach ($deviceKey in $deviceKeys) {{
+                                    $deviceKeyName = $deviceKey.Name
+                                    $deviceKeyBaseName = Split-Path $deviceKeyName -Leaf
+                                    
+                                    # Check if this device key matches our criteria
+                                    $deviceMatchFound = $false
+                                    
+                                    # Check for VID/PID match in ##?# structure
+                                    if ($vidPid -ne "" -and $deviceKeyBaseName -like "*$vidPid*") {{
+                                        $deviceMatchFound = $true
+                                    }}
+                                    
+                                    # Check for device ID parts in the key name
+                                    foreach ($devPart in $deviceIDParts) {{
+                                        if ($devPart.Length -gt 3 -and $deviceKeyBaseName -like "*$devPart*") {{
+                                            $deviceMatchFound = $true
+                                            break
+                                        }}
+                                    }}
+                                    
+                                    # Check for hardware ID parts
+                                    foreach ($hwPart in $hwIDParts) {{
+                                        if ($hwPart.Length -gt 3 -and $deviceKeyBaseName -like "*$hwPart*") {{
+                                            $deviceMatchFound = $true
+                                            break
+                                        }}
+                                    }}
+                                    
+                                    if ($deviceMatchFound) {{
+                                        Write-Host "Found matching DeviceClass: $deviceKeyName"
+                                        $relativeDeviceKeyPath = $deviceKeyName -replace "HKEY_LOCAL_MACHINE\\\\", ""
+                                        $foundPaths += $relativeDeviceKeyPath
+                                        
+                                        # Check for #GLOBAL subkey
+                                        $globalPath = Join-Path $deviceKey.PSPath "#GLOBAL"
+                                        if (Test-Path $globalPath) {{
+                                            $relativeGlobalPath = ($globalPath -replace "Microsoft.PowerShell.Core\\\\Registry::", "") -replace "HKEY_LOCAL_MACHINE\\\\", ""
+                                            $foundPaths += $relativeGlobalPath
+                                            Write-Host "Found #GLOBAL: $relativeGlobalPath"
+                                            
+                                            # Check Device Parameters under #GLOBAL
+                                            $globalDeviceParams = Join-Path $globalPath "Device Parameters"
+                                            if (Test-Path $globalDeviceParams) {{
+                                                $relativeGlobalDeviceParams = ($globalDeviceParams -replace "Microsoft.PowerShell.Core\\\\Registry::", "") -replace "HKEY_LOCAL_MACHINE\\\\", ""
+                                                $foundPaths += $relativeGlobalDeviceParams
+                                                Write-Host "Found Device Parameters: $relativeGlobalDeviceParams"
+                                            }}
+                                        }}
+                                        
+                                        # Also check for Device Parameters directly under the device key
+                                        $directDeviceParams = Join-Path $deviceKey.PSPath "Device Parameters"
+                                        if (Test-Path $directDeviceParams) {{
+                                            $relativeDirectDeviceParams = ($directDeviceParams -replace "Microsoft.PowerShell.Core\\\\Registry::", "") -replace "HKEY_LOCAL_MACHINE\\\\", ""
+                                            $foundPaths += $relativeDirectDeviceParams
+                                            Write-Host "Found direct Device Parameters: $relativeDirectDeviceParams"
+                                        }}
+                                    }}
+                                }}
+                            }} catch {{
+                                # Continue on access errors for individual GUID folders
+                                Write-Host "Access denied to GUID folder: $($guidFolder.Name)"
+                            }}
+                        }}
+                    }} catch {{
+                        Write-Host "Access denied to DeviceClasses"
+                    }}
+                }}
+                
+                # Also search specifically in known camera-related paths
+                $specificPaths = @(
+                    "Class",
+                    "CoDeviceInstallers", 
+                    "MediaCategories",
+                    "MediaInterfaces",
+                    "MediaResources",
+                    "MediaSets"
+                )
+                
+                foreach ($specificPath in $specificPaths) {{
+                    $fullSpecificPath = Join-Path $controlPath $specificPath
+                    if (Test-Path $fullSpecificPath) {{
+                        try {{
+                            $specificSubDirs = Get-ChildItem $fullSpecificPath -Recurse -ErrorAction SilentlyContinue | Where-Object {{ $_.PSIsContainer }}
+                            
+                            foreach ($specificSubDir in $specificSubDirs) {{
+                                $specificKeyName = $specificSubDir.Name
+                                $specificMatchFound = $false
+                                
+                                # Check device ID match
+                                if ($specificKeyName -like "*$deviceID*") {{
+                                    $specificMatchFound = $true
+                                }}
+                                
+                                # Check VID/PID match
+                                if ($vidPid -ne "" -and $specificKeyName -like "*$vidPid*") {{
+                                    $specificMatchFound = $true
+                                }}
+                                
+                                # Check hardware ID parts match
+                                foreach ($hwPart in $hwIDParts) {{
+                                    if ($hwPart.Length -gt 3 -and $specificKeyName -like "*$hwPart*") {{
+                                        $specificMatchFound = $true
+                                        break
+                                    }}
+                                }}
+                                
+                                if ($specificMatchFound) {{
+                                    $specificRelativePath = $specificKeyName -replace "HKEY_LOCAL_MACHINE\\\\", ""
+                                    $foundPaths += $specificRelativePath
+                                    
+                                    # Check for subkeys
+                                    $specificCommonSubKeys = @("Device Parameters", "#GLOBAL", "Properties")
+                                    foreach ($specificSubKeyName in $specificCommonSubKeys) {{
+                                        $specificSubKeyPath = Join-Path $specificSubDir.PSPath $specificSubKeyName
+                                        if (Test-Path $specificSubKeyPath) {{
+                                            $specificRelativeSubPath = ($specificSubKeyPath -replace "Microsoft.PowerShell.Core\\\\Registry::", "") -replace "HKEY_LOCAL_MACHINE\\\\", ""
+                                            $foundPaths += $specificRelativeSubPath
+                                        }}
+                                    }}
+                                }}
+                            }}
+                        }} catch {{
+                            # Continue on access errors
+                        }}
+                    }}
+                }}
+            }} catch {{
+                # Continue on access errors
             }}
         }}
         
-        # Output found paths
-        $foundPaths | ForEach-Object {{ Write-Output $_ }}
+        # Remove duplicates and output found paths
+        $foundPaths | Select-Object -Unique | ForEach-Object {{ Write-Output $_ }}
         """
 
         try:
@@ -1221,26 +1547,38 @@ class CamRenamerMainWindow(QMainWindow):
                 text=True,
                 encoding='utf-8',
                 errors='replace',
-                timeout=30
+                timeout=60  # Increased timeout for more extensive search
             )
 
             if result.returncode == 0 and result.stdout.strip():
                 for line in result.stdout.strip().split('\n'):
                     path = line.strip()
-                    if path and path not in registry_paths:
+                    if path and path not in registry_paths and not path.startswith('Searching') and not path.startswith('Found') and not path.startswith('Access denied'):
                         registry_paths.append(path)
 
         except Exception as e:
-            print(f"Error searching DeviceClasses: {e}")
+            print(f"Error searching Control registry: {e}")
 
         return registry_paths
 
     def update_camera_name_in_registry(self, camera: CameraDevice, new_name: str) -> bool:
-        """Updates the camera name in the registry with backup creation"""
+        """Updates the camera name in the registry with optimized threaded search"""
         try:
-            # Find all registry paths for this camera
-            self.statusBar().showMessage("Searching for registry entries...")
-            registry_paths = self.find_all_camera_registry_paths(camera)
+            # Use the optimized registry search thread
+            registry_search = RegistrySearchThread(camera)
+            registry_paths = []
+
+            # Connect to get results
+            def on_search_completed(paths):
+                nonlocal registry_paths
+                registry_paths = paths
+
+            registry_search.search_completed.connect(on_search_completed)
+            registry_search.progress_updated.connect(self.statusBar().showMessage)
+
+            # Run synchronously and wait for completion
+            registry_search.start()
+            registry_search.wait()  # Wait for thread to complete
 
             if not registry_paths:
                 return False
@@ -1291,7 +1629,7 @@ class CamRenamerMainWindow(QMainWindow):
                             text=True,
                             encoding='utf-8',
                             errors='replace',
-                            timeout=10
+                            timeout=5  # Reduced timeout
                         )
 
                         if result.returncode == 0 and "SUCCESS" in result.stdout:
@@ -1322,9 +1660,6 @@ class CamRenamerMainWindow(QMainWindow):
 
             return success_count > 0
 
-        except subprocess.TimeoutExpired:
-            print("Timeout during registry update")
-            return False
         except Exception as e:
             print(f"Error during registry update: {e}")
             return False
@@ -1354,8 +1689,9 @@ def main():
     app.setOrganizationDomain("retroverse.de")
 
     # Enable high-DPI support and improve text rendering
-    app.setAttribute(Qt.ApplicationAttribute.AA_EnableHighDpiScaling, True)
-    app.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps, True)
+    print("CamRenamer is starting...")
+    #app.setAttribute(Qt.ApplicationAttribute.AA_EnableHighDpiScaling, True)
+    #app.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps, True)
     app.setAttribute(Qt.ApplicationAttribute.AA_SynthesizeMouseForUnhandledTabletEvents, False)
 
     # Set default font with antialiasing
