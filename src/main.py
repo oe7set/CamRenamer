@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, QWidget,
     QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem,
     QMessageBox, QHeaderView, QGroupBox, QProgressBar,
-    QSplashScreen, QToolBar, QDialog, QTextEdit, QCheckBox
+    QSplashScreen, QToolBar, QDialog, QTextEdit, QCheckBox, QProgressDialog
 )
 from PySide6.QtCore import Qt, QThread, Signal, QTimer
 from PySide6.QtGui import QFont, QColor, QPixmap, QPainter, QAction
@@ -281,7 +281,7 @@ class EnhancedRegistrySearchThread(QThread):
         if not device_id:
             return []
 
-        powershell_cmd = f"""
+        powershell_cmd = r"""
         [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
         $vidPid = "{device_id}"
         $foundPaths = @()
@@ -1939,9 +1939,24 @@ class CamRenamerMainWindow(QMainWindow):
     def update_camera_name_in_registry_with_paths(self, camera: CameraDevice, new_name: str, registry_paths: List[str]) -> bool:
         """Updates the camera name in the registry using provided paths"""
         try:
+            # Backup-Progress-Popup anzeigen
+            backup_dialog = QProgressDialog("Erstelle Registry-Backup...", "", 0, 0, self, Qt.WindowType.Dialog)
+            backup_dialog.setWindowTitle("Backup")
+            backup_dialog.setCancelButton(None)
+            # backup_dialog.setWindowModality(Qt.WindowModal)
+            backup_dialog.setMinimumDuration(0)  # Sofort anzeigen
+            backup_dialog.show()
+            QApplication.processEvents()
+
             # Create backup before making changes
             self.statusBar().showMessage("Creating backup...")
+
+            QApplication.processEvents()
             backup_path = self.create_registry_backup(camera, registry_paths)
+
+            # Fortschritt ändern und Auto-Close einleiten
+            backup_dialog.setLabelText("Backup abgeschlossen")
+            QTimer.singleShot(800, backup_dialog.close)  # Schließt sich nach 0.8s automatisch
 
             success_count = 0
             total_paths = len(registry_paths)
