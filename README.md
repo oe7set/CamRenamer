@@ -27,15 +27,15 @@ CamRenamer allows you to easily rename USB cameras by changing their names direc
 ┌─────────────────────────────────────────────────────────────┐
 │ 🎥 USB Camera Manager                      🔄 Scan Cameras │
 ├─────────────────────────────────────────────────────────────┤
-│ 📋 Found USB Cameras                                       │
+│ 📋 Found USB Cameras                                        │
 │ ┌─────────────────────────────────────────────────────────┐ │
-│ │ 🎥 Name    │ 🔧 Device ID │ 💾 HW ID  │ 🔌 Status    │ │
-│ │ USB Camera │ USB\VID_1234 │ USB\...   │ 🟢 Connected │ │
+│ │ 🎥 Name    │ 🔧 Device ID │ 💾 HW ID  │ 🔌 Status     │ │
+│ │ USB Camera │ USB\VID_1234 │ USB\...   │ 🟢 Connected   │ │
 │ └─────────────────────────────────────────────────────────┘ │
 │                                                             │
 │ ✏️ Rename Camera                                            │
 │ ┌─────────────────────────────────────────────────────────┐ │
-│ │ 📝 New Name: [Streaming Camera Left     ] ✅ Rename     │ │
+│ │ 📝 New Name: [Streaming Camera Left     ] ✅ Rename    │ │
 │ └─────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -50,7 +50,7 @@ CamRenamer allows you to easily rename USB cameras by changing their names direc
 
 ### Option 1: Executable File (Recommended)
 
-1. Download the latest version from [Releases](https://github.com/retroverse/camrenamer/releases)
+1. Download the latest version from [Releases](https://github.com/oe7set/camrenamer/releases)
 2. Extract the ZIP file
 3. Run `CamRenamer.exe` as Administrator
 
@@ -272,8 +272,8 @@ This project is licensed under the MIT License. See [LICENSE](LICENSE) for detai
 
 ## 📊 Statistics
 
-![GitHub release (latest by date)](https://img.shields.io/github/v/release/retroverse/camrenamer)
-![GitHub](https://img.shields.io/github/license/retroverse/camrenamer)
+![GitHub release (latest by date)](https://img.shields.io/github/v/release/oe7set/camrenamer)
+![GitHub](https://img.shields.io/github/license/oe7set/camrenamer)
 ![Python](https://img.shields.io/badge/python-3.12+-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey.svg)
 
