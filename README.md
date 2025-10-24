@@ -94,7 +94,7 @@ python src/main_complete.py
 
 1. **Run as Administrator**: Right-click on the application → "Run as administrator"
 
-2. **Scan Cameras**: 
+2. **Scan Cameras**:
    - Click on "🔄 Scan Cameras" or press F5
    - All connected USB cameras will be listed
 
@@ -284,3 +284,5 @@ This project is licensed under the MIT License. See [LICENSE](LICENSE) for detai
 ---
 
 **Developed with ❤️ by [Erwin Spitaler OE7SET](https://github.com/oe7set)**
+
+pyinstaller --onefile --windowed --icon=src\img\icon.ico src\main.py

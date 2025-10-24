@@ -14,7 +14,15 @@ from PySide6.QtWidgets import (
     QSplashScreen, QToolBar, QDialog, QTextEdit, QCheckBox, QProgressDialog
 )
 from PySide6.QtCore import Qt, QThread, Signal, QTimer
-from PySide6.QtGui import QFont, QColor, QPixmap, QPainter, QAction
+from PySide6.QtGui import QFont, QColor, QPixmap, QPainter, QAction, QIcon
+
+import resources  #:noqa: F401
+
+
+startupinfo = None
+if sys.platform == "win32":
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 
 
 @dataclass
@@ -654,6 +662,7 @@ class EnhancedRegistrySearchThread(QThread):
         try:
             result = subprocess.run(
                 ["powershell", "-ExecutionPolicy", "Bypass", "-Command", cmd],
+                startupinfo=startupinfo,
                 capture_output=True,
                 text=True,
                 encoding='utf-8',
@@ -808,6 +817,7 @@ class RegistrySearchThread(QThread):
         try:
             result = subprocess.run(
                 ["powershell", "-ExecutionPolicy", "Bypass", "-Command", powershell_cmd],
+                startupinfo=startupinfo,
                 capture_output=True,
                 text=True,
                 encoding='utf-8',
@@ -858,6 +868,7 @@ class CameraScanner(QThread):
             # Execute PowerShell with explicit UTF-8 encoding
             result = subprocess.run(
                 ["powershell", "-ExecutionPolicy", "Bypass", "-Command", powershell_cmd],
+                startupinfo=startupinfo,
                 capture_output=True,
                 text=True,
                 encoding='utf-8',
@@ -1176,6 +1187,7 @@ class BackupThread(QThread):
             # Single PowerShell execution for all paths
             result = subprocess.run(
                 ["powershell", "-ExecutionPolicy", "Bypass", "-Command", powershell_cmd],
+                startupinfo=startupinfo,
                 capture_output=True,
                 text=True,
                 encoding='utf-8',
@@ -2216,6 +2228,7 @@ class CamRenamerMainWindow(QMainWindow):
 
                         result = subprocess.run(
                             ["powershell", "-ExecutionPolicy", "Bypass", "-Command", powershell_cmd],
+                            startupinfo=startupinfo,
                             capture_output=True,
                             text=True,
                             encoding='utf-8',
@@ -2344,6 +2357,7 @@ class CamRenamerMainWindow(QMainWindow):
             # Single PowerShell execution for all paths
             result = subprocess.run(
                 ["powershell", "-ExecutionPolicy", "Bypass", "-Command", powershell_cmd],
+                startupinfo=startupinfo,
                 capture_output=True,
                 text=True,
                 encoding='utf-8',
@@ -2421,6 +2435,9 @@ def main():
     app.setApplicationVersion("1.1")
     app.setOrganizationName("Retroverse")
     app.setOrganizationDomain("retroverse.de")
+
+    icon = QIcon(":/img/icon.png")
+    app.setWindowIcon(icon)
 
     # Enable high-DPI support and improve text rendering
     print("CamRenamer is starting...")
