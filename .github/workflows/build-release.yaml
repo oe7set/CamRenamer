@@ -44,8 +44,86 @@ jobs:
         run: |
           uv run pyinstaller --noconfirm --onefile --windowed --icon=src\img\icon.ico --name CamRenamer src/main.py
 
-      - name: Upload EXE
+      - name: Package EXE into ZIP
+        run: |
+          mkdir -p dist_zip
+          cp dist/CamRenamer.exe dist_zip/ || true
+          cd dist_zip
+          if [ -f CamRenamer.exe ]; then
+            zip -r ../CamRenamer-windows-x64.zip CamRenamer.exe
+          else
+            echo "WARN: dist/CamRenamer.exe nicht gefunden - keine ZIP erstellt" >&2
+          fi
+        shell: bash
+
+      - name: Upload ZIP artifact
         uses: actions/upload-artifact@v4
         with:
-          name: CamRenamer-exe
-          path: dist/CamRenamer.exe
+          name: CamRenamer-zip
+          path: CamRenamer-windows-x64.zip
+
+  release:
+    name: Create / Update Release
+    runs-on: ubuntu-latest
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - name: Checkout (for repo context)
+        uses: actions/checkout@v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: Inspect downloaded artifacts
+        run: |
+          echo "=== ARTIFACTS TREE ==="
+          ls -R artifacts || true
+
+      - name: Find ZIP and extract CamRenamer.exe
+        run: |
+          set -e
+          # Finde erste ZIP
+          ZIP_PATH=$(find artifacts -type f -name "*.zip" -print -quit || true)
+          if [ -z "$ZIP_PATH" ]; then
+            echo "ERROR: Keine ZIP-Datei in artifacts gefunden." >&2
+            ls -R artifacts || true
+            exit 1
+          fi
+          echo "Found ZIP: $ZIP_PATH"
+          # Kopiere ZIP in Arbeitsverzeichnis mit standardisiertem Namen
+          cp "$ZIP_PATH" ./CamRenamer-windows-x64.zip
+          # Entpacken
+          mkdir -p extracted
+          unzip -q ./CamRenamer-windows-x64.zip -d extracted || true
+          # Suche nach CamRenamer.exe innerhalb der entpackten Dateien
+          EXE_PATH=$(find extracted -type f -iname "CamRenamer.exe" -print -quit || true)
+          if [ -z "$EXE_PATH" ]; then
+            echo "ERROR: CamRenamer.exe nicht in ZIP gefunden." >&2
+            echo "Contents of extracted:"
+            ls -R extracted || true
+            exit 1
+          fi
+          echo "Found EXE inside ZIP: $EXE_PATH"
+          # Kopiere / benenne die EXE für den Release-Anhang
+          cp "$EXE_PATH" ./CamRenamer-windows-x64.exe
+          ls -l CamRenamer-windows-x64.zip CamRenamer-windows-x64.exe
+
+      - name: Publish Release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ github.ref_name }}
+          name: CamRenamer ${{ github.ref_name }}
+          body: |
+            CamRenamer — Automatischer Release-Build für Tag ${{ github.ref_name }}.
+
+            Enthält:
+            - Windows x64 Single File (.exe) (in der ZIP: CamRenamer.exe)
+
+            Automated release build for tag ${{ github.ref_name }}.
+          artifacts: "CamRenamer-windows-x64.zip,CamRenamer-windows-x64.exe"
+          allowUpdates: true
+          artifactErrorsFailBuild: true
+          generateReleaseNotes: true
