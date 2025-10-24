@@ -2,8 +2,6 @@
 
 A Windows application for renaming USB cameras in the Registry for better identification in streaming software like OBS.
 
-![CamRenamer Logo](https://via.placeholder.com/400x100/2b2b2b/ffffff?text=🎥+CamRenamer+v1.1)
-
 ## 📋 Overview
 
 CamRenamer allows you to easily rename USB cameras by changing their names directly in the Windows Registry. This is particularly useful for:
@@ -170,7 +168,7 @@ uv run mypy src/
 
 ```powershell
 # Executable with PyInstaller
-uv run pyinstaller --windowed --onefile --name CamRenamer src/main_complete.py
+uv run pyinstaller --windowed --onefile --icon=src\img\icon.ico --name CamRenamer src/main.py
 
 # Or with auto-py-to-exe (GUI)
 uv run auto-py-to-exe
@@ -181,16 +179,13 @@ uv run auto-py-to-exe
 ```
 CamRenamer/
 ├── src/
-│   ├── main.py              # Original main file (incomplete)
-│   └── main_complete.py     # Improved main file
-├── tests/
-│   ├── __init__.py
-│   ├── test_camera_scanner.py
-│   └── test_registry_update.py
-├── docs/
-│   └── README.md
-├── pyproject.toml           # Original
-├── pyproject_improved.toml # Improved version
+│   ├── img/   
+│   │   ├── icon.ico
+│   |   └── icon.png
+│   ├── main.py           
+│   ├── resources.py       #auto gen ps1"cd src;pyside6-rcc resources.qrc -o resources.py"     
+│   └── resources.qrc
+├── pyproject.toml        
 ├── uv.lock
 ├── LICENSE
 └── README.md
@@ -245,7 +240,8 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 
 - 🐛 **Bug Reports**: [GitHub Issues](https://github.com/retroverse/camrenamer/issues)
 - 💡 **Feature Requests**: [GitHub Discussions](https://github.com/retroverse/camrenamer/discussions)
-- 📧 **Email**: erwin@retroverse.de
+[!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/oe7set)
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/O5O31L3XGA)
 
 ## 🤝 Contributing
 
@@ -280,6 +276,7 @@ This project is licensed under the MIT License. See [LICENSE](LICENSE) for detai
 ![GitHub](https://img.shields.io/github/license/retroverse/camrenamer)
 ![Python](https://img.shields.io/badge/python-3.12+-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey.svg)
+
 
 ---
 

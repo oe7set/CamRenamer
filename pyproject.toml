@@ -1,6 +1,6 @@
 [project]
 name = "camrenamer"
-version = "1.0.0"
+version = "1.1.0"
 description = "Rename USB Camera devices based on their physical location."
 authors = [
     { name = "Erwin Spitaler", email = "erwin.spitaler@outlook.com" }
