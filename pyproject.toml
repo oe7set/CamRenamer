@@ -29,17 +29,6 @@ Homepage = "https://github.com/oe7set/camrenamer"
 Repository = "https://github.com/oe7set/camrenamer"
 "Bug Tracker" = "https://github.com/oe7set/camrenamer/issues"
 
-[project.scripts]
-camrenamer = "camrenamer.main_complete:main"
-
-[project.gui-scripts]
-camrenamer-gui = "camrenamer.main_complete:main"
-
-## Build system
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
 ## Linting configuration
 [tool.ruff]
 line-length = 130
