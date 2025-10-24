@@ -42,7 +42,7 @@ jobs:
 
       - name: Build EXE with PyInstaller
         run: |
-          uv run pyinstaller --noconfirm --onefile --windowed --name CamRenamer main.spec
+          uv run pyinstaller --noconfirm --onefile --windowed --icon=src\img\icon.ico --name CamRenamer src/main.py
 
       - name: Upload EXE
         uses: actions/upload-artifact@v4
