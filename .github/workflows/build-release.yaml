@@ -45,16 +45,16 @@ jobs:
           uv run pyinstaller --noconfirm --onefile --windowed --icon=src\img\icon.ico --name CamRenamer src/main.py
 
       - name: Package EXE into ZIP
+        shell: pwsh
         run: |
-          mkdir -p dist_zip
-          cp dist/CamRenamer.exe dist_zip/ || true
-          cd dist_zip
-          if [ -f CamRenamer.exe ]; then
-            zip -r ../CamRenamer-windows-x64.zip CamRenamer.exe
-          else
-            echo "WARN: dist/CamRenamer.exe nicht gefunden - keine ZIP erstellt" >&2
-          fi
-        shell: bash
+          if (Test-Path 'dist\CamRenamer.exe') {
+            Compress-Archive -Path 'dist\CamRenamer.exe' -DestinationPath 'CamRenamer-windows-x64.zip' -Force
+            Write-Output "Created CamRenamer-windows-x64.zip"
+            Get-ChildItem -Path . -Filter "CamRenamer-windows-x64.zip" | Format-List
+          } else {
+            Write-Error 'dist\CamRenamer.exe nicht gefunden - Build wahrscheinlich fehlgeschlagen'
+            exit 1
+          }
 
       - name: Upload ZIP artifact
         uses: actions/upload-artifact@v4
@@ -117,10 +117,7 @@ jobs:
           tag: ${{ github.ref_name }}
           name: CamRenamer ${{ github.ref_name }}
           body: |
-            CamRenamer — Automatischer Release-Build für Tag ${{ github.ref_name }}.
-
-            Enthält:
-            - Windows x64 Single File (.exe) (in der ZIP: CamRenamer.exe)
+            CamRenamer — Release-Build für Tag ${{ github.ref_name }}.
 
             Automated release build for tag ${{ github.ref_name }}.
           artifacts: "CamRenamer-windows-x64.zip,CamRenamer-windows-x64.exe"
