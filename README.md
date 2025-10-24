@@ -58,21 +58,21 @@ CamRenamer allows you to easily rename USB cameras by changing their names direc
 
 ```powershell
 # Clone repository
-git clone https://github.com/retroverse/camrenamer.git
+git clone https://github.com/oe7set/camrenamer.git
 cd camrenamer
 
 # Install dependencies
 uv sync
 
 # Start application
-uv run python src/main_complete.py
+uv run python src/main.py
 ```
 
 ### Option 3: With pip
 
 ```powershell
 # Clone repository
-git clone https://github.com/retroverse/camrenamer.git
+git clone https://github.com/oe7set/camrenamer.git
 cd camrenamer
 
 # Create virtual environment
@@ -83,7 +83,7 @@ venv\Scripts\activate
 pip install -e .[dev]
 
 # Start application
-python src/main_complete.py
+python src/main.py
 ```
 
 ## 🎮 Usage
@@ -125,7 +125,7 @@ python src/main_complete.py
 
 ```powershell
 # Clone repository
-git clone https://github.com/retroverse/camrenamer.git
+git clone https://github.com/oe7set/camrenamer.git
 cd camrenamer
 
 # Development environment with uv
