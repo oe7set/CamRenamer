@@ -74,7 +74,7 @@ class RegistrySearchDialog(QDialog):
         self.auto_close_timer.timeout.connect(self.accept)
         self.countdown_timer = QTimer()
         self.countdown_timer.timeout.connect(self.update_countdown)
-        self.countdown_seconds = 5
+        self.countdown_seconds = 4
 
     def update_progress(self, value, status):
         """Update progress bar and status"""
@@ -96,10 +96,10 @@ class RegistrySearchDialog(QDialog):
 
     def start_auto_close(self):
         """Start the auto-close countdown"""
-        self.countdown_seconds = 5
+        self.countdown_seconds = 4
         self.update_countdown()
         self.countdown_timer.start(1000)  # Update every second
-        self.auto_close_timer.start(5000)  # Close after 5 seconds
+        self.auto_close_timer.start(4000)  # Close after 3 seconds
 
     def update_countdown(self):
         """Update the countdown display"""
@@ -163,6 +163,44 @@ class EnhancedRegistrySearchThread(QThread):
         total_steps = sum(1 for key, value in self.search_options.items() if value and key != 'vid_pid_matching' and key != 'friendly_name_search')
         step_increment = 90 / max(total_steps, 1)  # Reserve 10% for final processing
 
+        # Flag für kontinuierliche Animation setzen
+        self.animate_progress = True
+        self.current_step_progress = 0
+        self.target_progress = 0
+
+        # Separater Worker-Thread für Animation (läuft parallel)
+        def animation_worker():
+            while self.animate_progress:
+                # Sanfte Bewegung zum Zielwert
+                if abs(self.current_step_progress - self.target_progress) > 0.1:
+                    # Bewege sich langsam zum Ziel
+                    diff = self.target_progress - self.current_step_progress
+                    self.current_step_progress += diff * 0.1  # 10% pro Update
+
+                    self.progress_updated.emit(int(self.current_step_progress), f"Arbeite... ({int(self.current_step_progress)}%)")
+                else:
+                    # Am Ziel angekommen - kleine zufällige Bewegung
+                    import random
+                    jitter = random.uniform(-0.3, 0.3)
+                    display_progress = max(0, min(100, self.current_step_progress + jitter))
+
+                    self.progress_updated.emit(int(display_progress), f"Verarbeite... ({int(self.current_step_progress)}%)")
+
+                self.msleep(100)  # Update alle 100ms für sichtbare Animation
+
+        # Animation-Thread starten
+        import threading
+        animation_thread = threading.Thread(target=animation_worker, daemon=True)
+        animation_thread.start()
+
+        def set_target_progress(target, status):
+            """Setzt neuen Zielwert für Animation"""
+            self.target_progress = float(target)
+            # Sofortiges Update für Status-Text
+            self.progress_updated.emit(int(self.current_step_progress), status)
+
+        # Emit initial progress
+        set_target_progress(5, "Initialisiere Registry-Suche...")
         # Extract VID/PID if matching is enabled
         vid_pid = ""
         if self.search_options.get("vid_pid_matching", True):
@@ -174,7 +212,7 @@ class EnhancedRegistrySearchThread(QThread):
         # Step 0: Device Manager FriendlyName search
         if self.search_options.get("device_manager_friendly_name", True):
             progress += step_increment
-            self.progress_updated.emit(int(progress), "Searching Device Manager FriendlyName entries...")
+            set_target_progress(int(progress), "Searching Device Manager FriendlyName entries...")
             dm_paths = self.search_device_manager_friendly_name(self.camera)
             registry_paths.extend(dm_paths)
         else:
@@ -184,7 +222,7 @@ class EnhancedRegistrySearchThread(QThread):
         # Step 1: Standard device ID paths
         if self.search_options.get("standard_device_paths", True):
             progress += step_increment
-            self.progress_updated.emit(int(progress), "Searching standard device paths...")
+            set_target_progress(int(progress), "Searching standard device paths...")
             standard_paths = self.search_standard_device_paths(self.camera.device_id.replace("\\", "#"))
             registry_paths.extend(standard_paths)
         else:
@@ -193,7 +231,7 @@ class EnhancedRegistrySearchThread(QThread):
         # Step 2: Device Classes search
         if self.search_options.get("device_classes", True):
             progress += step_increment
-            self.progress_updated.emit(int(progress), "Searching Device Classes...")
+            set_target_progress(int(progress), "Searching Device Classes...")
             device_class_paths = self.search_device_classes(vid_pid)
             registry_paths.extend(device_class_paths)
         else:
@@ -202,7 +240,7 @@ class EnhancedRegistrySearchThread(QThread):
         # Step 3: USB interfaces and storage paths
         if self.search_options.get("usb_interfaces", True):
             progress += step_increment
-            self.progress_updated.emit(int(progress), "Searching USB interfaces...")
+            set_target_progress(int(progress), "Searching USB interfaces...")
             usb_paths = self.search_usb_interfaces(vid_pid)
             registry_paths.extend(usb_paths)
         else:
@@ -211,7 +249,7 @@ class EnhancedRegistrySearchThread(QThread):
         # Step 4: System driver entries
         if self.search_options.get("system_drivers", False):
             progress += step_increment
-            self.progress_updated.emit(int(progress), "Searching system drivers...")
+            set_target_progress(int(progress), "Searching system drivers...")
             driver_paths = self.search_system_drivers(vid_pid)
             registry_paths.extend(driver_paths)
         else:
@@ -220,7 +258,7 @@ class EnhancedRegistrySearchThread(QThread):
         # Step 5: Control panel and device manager entries
         if self.search_options.get("control_entries", False):
             progress += step_increment
-            self.progress_updated.emit(int(progress), "Searching control panel entries...")
+            set_target_progress(int(progress), "Searching control panel entries...")
             control_paths = self.search_control_entries(vid_pid)
             registry_paths.extend(control_paths)
         else:
@@ -229,7 +267,7 @@ class EnhancedRegistrySearchThread(QThread):
         # Step 6: Extended PowerShell-based search
         if self.search_options.get("powershell_extended", False):
             progress += step_increment
-            self.progress_updated.emit(int(progress), "Performing extended PowerShell search...")
+            set_target_progress(int(progress), "Performing extended PowerShell search...")
             ps_paths = self.powershell_comprehensive_search(vid_pid)
             registry_paths.extend(ps_paths)
         else:
@@ -245,7 +283,7 @@ class EnhancedRegistrySearchThread(QThread):
         #     self.result_found.emit("⏭️ Friendly Name Search: Disabled (skipped)")
 
         # Remove duplicates and filter valid paths
-        self.progress_updated.emit(95, "Filtering and validating results...")
+        set_target_progress(99, "Filtering and validating results...")
         unique_paths = list(set(registry_paths))
         valid_paths = [path for path in unique_paths if path and len(path) > 10]
 
@@ -259,10 +297,14 @@ class EnhancedRegistrySearchThread(QThread):
         self.result_found.emit(f"✅ Found {len(valid_paths)} unique registry paths")
 
         for path in valid_paths:
-            print(path)
+            # print(path)
             self.result_found.emit(f"📝 {path}")
 
+
+
+        self.animate_progress = False
         self.progress_updated.emit(100, "Search completed!")
+
         return valid_paths
 
     def extract_vid_pid(self) -> str:
@@ -281,7 +323,7 @@ class EnhancedRegistrySearchThread(QThread):
         if not device_id:
             return []
 
-        powershell_cmd = r"""
+        powershell_cmd = f"""
         [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
         $vidPid = "{device_id}"
         $foundPaths = @()
@@ -1013,6 +1055,155 @@ class ExitDialog(QDialog):
         """Opens URL in default browser"""
         import webbrowser
         webbrowser.open(url)
+
+
+class BackupThread(QThread):
+    """Thread for creating registry backups without blocking UI"""
+    backup_completed = Signal(str)
+    backup_failed = Signal(str)
+    progress_updated = Signal(str)
+
+    def __init__(self, camera: CameraDevice, registry_paths: List[str]):
+        super().__init__()
+        self.camera = camera
+        self.registry_paths = registry_paths
+
+    def run(self):
+        """Execute backup creation in background thread"""
+        try:
+            self.progress_updated.emit("Initialisiere Backup...")
+            backup_path = self.create_registry_backup(self.camera, self.registry_paths)
+
+            if backup_path:
+                self.backup_completed.emit(backup_path)
+            else:
+                self.backup_failed.emit("Backup konnte nicht erstellt werden")
+
+        except Exception as e:
+            self.backup_failed.emit(f"Backup-Error: {str(e)}")
+
+    def create_backup_folder(self):
+        """Creates the backup folder if it doesn't exist"""
+        backup_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "CamRenamer_Backups")
+        os.makedirs(backup_folder, exist_ok=True)
+        return backup_folder
+
+    def create_registry_backup(self, camera: CameraDevice, registry_paths: List[str]) -> str:
+        """Creates a backup .reg file for the camera registry entries - optimized version"""
+        try:
+            self.progress_updated.emit("Create Backup-File...")
+
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            safe_device_id = camera.device_id.replace("\\", "_").replace("/", "_").replace(":", "_")
+            safe_hardware_id = camera.hardware_id[:20].replace("\\", "_").replace("/", "_").replace(":",
+                                                                                                    "_") if camera.hardware_id else "unknown"
+
+            backup_filename = f"CamRenamer_Backup_{safe_hardware_id}_{safe_device_id}_{timestamp}.reg"
+            backup_folder = self.create_backup_folder()
+            backup_path = os.path.join(backup_folder, backup_filename)
+
+            self.progress_updated.emit("Reading Registry-entries...")
+
+            # Create single PowerShell script that processes all paths at once
+            paths_array = "', '".join([path.replace('"', '').strip() for path in registry_paths])
+
+            powershell_cmd = f"""
+            $paths = @('{paths_array}')
+
+            foreach ($regPath in $paths) {{
+                $fullPath = "HKLM:\\$regPath"
+                if (Test-Path $fullPath) {{
+                    try {{
+                        $key = Get-Item $fullPath -ErrorAction SilentlyContinue
+                        if ($key) {{
+                            Write-Output "[HKEY_LOCAL_MACHINE\\$regPath]"
+
+                            $key.GetValueNames() | ForEach-Object {{
+                                $valueName = $_
+                                $value = $key.GetValue($valueName)
+                                $valueType = $key.GetValueKind($valueName)
+
+                                if ($valueName -eq "") {{
+                                    $regValueName = "@"
+                                }} else {{
+                                    $regValueName = "`"$valueName`""
+                                }}
+
+                                switch ($valueType) {{
+                                    "String" {{
+                                        $escapedValue = $value -replace '\\\\', '\\\\\\\\' -replace '"', '\\"'
+                                        Write-Output "$regValueName=`"$escapedValue`""
+                                    }}
+                                    "DWord" {{
+                                        $hexValue = [System.Convert]::ToString([int]$value, 16).PadLeft(8, '0')
+                                        Write-Output "$regValueName=dword:$hexValue"
+                                    }}
+                                    "QWord" {{
+                                        $hexValue = [System.Convert]::ToString([long]$value, 16).PadLeft(16, '0')
+                                        Write-Output "$regValueName=qword:$hexValue"
+                                    }}
+                                    "Binary" {{
+                                        $hexString = ($value | ForEach-Object {{ [System.Convert]::ToString($_, 16).PadLeft(2, '0') }}) -join ','
+                                        Write-Output "$regValueName=hex:$hexString"
+                                    }}
+                                    "MultiString" {{
+                                        $hexBytes = [System.Text.Encoding]::Unicode.GetBytes(($value -join "`0") + "`0`0")
+                                        $hexString = ($hexBytes | ForEach-Object {{ [System.Convert]::ToString($_, 16).PadLeft(2, '0') }}) -join ','
+                                        Write-Output "$regValueName=hex(7):$hexString"
+                                    }}
+                                    "ExpandString" {{
+                                        $hexBytes = [System.Text.Encoding]::Unicode.GetBytes($value + "`0")
+                                        $hexString = ($hexBytes | ForEach-Object {{ [System.Convert]::ToString($_, 16).PadLeft(2, '0') }}) -join ','
+                                        Write-Output "$regValueName=hex(2):$hexString"
+                                    }}
+                                }}
+                            }}
+                            Write-Output ""
+                        }}
+                    }} catch {{
+                        Write-Output "; Error accessing: $regPath"
+                        Write-Output ""
+                    }}
+                }} else {{
+                    Write-Output "; Registry key not found: $regPath"
+                    Write-Output ""
+                }}
+            }}
+            """
+
+            self.progress_updated.emit("Running Registry backup...")
+
+            # Single PowerShell execution for all paths
+            result = subprocess.run(
+                ["powershell", "-ExecutionPolicy", "Bypass", "-Command", powershell_cmd],
+                capture_output=True,
+                text=True,
+                encoding='utf-8',
+                errors='replace',
+                timeout=60
+            )
+
+            self.progress_updated.emit("Writing backup file...")
+
+            # Write to file
+            with open(backup_path, 'w', encoding='utf-16le') as f:
+                f.write('\ufeffWindows Registry Editor Version 5.00\n\n')
+                f.write(f'; CamRenamer Backup created on {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\n')
+                f.write(f'; Camera: {camera.friendly_name}\n')
+                f.write(f'; Device ID: {camera.device_id}\n')
+                f.write(f'; Hardware ID: {camera.hardware_id}\n\n')
+
+                if result.returncode == 0 and result.stdout.strip():
+                    f.write(result.stdout)
+                else:
+                    f.write(f'; Error during backup: {result.stderr}\n')
+
+            self.progress_updated.emit("Backup created successfully!")
+            return backup_path
+
+        except Exception as e:
+            print(f"Error creating backup: {e}")
+            return ""
 
 
 class AboutDialog(QDialog):
@@ -1937,27 +2128,56 @@ class CamRenamerMainWindow(QMainWindow):
                 )
 
     def update_camera_name_in_registry_with_paths(self, camera: CameraDevice, new_name: str, registry_paths: List[str]) -> bool:
-        """Updates the camera name in the registry using provided paths"""
+        """Updates the camera name in the registry using provided paths with threaded backup"""
         try:
-            # Backup-Progress-Popup anzeigen
-            backup_dialog = QProgressDialog("Erstelle Registry-Backup...", "", 0, 0, self, Qt.WindowType.Dialog)
-            backup_dialog.setWindowTitle("Backup")
+            # Backup-Progress-Dialog erstellen (non-modal)
+            backup_dialog = QProgressDialog("Erstelle Registry-Backup...", "", 0, 0, self)
+            backup_dialog.setWindowTitle("Backup wird erstellt")
             backup_dialog.setCancelButton(None)
-            # backup_dialog.setWindowModality(Qt.WindowModal)
-            backup_dialog.setMinimumDuration(0)  # Sofort anzeigen
+            backup_dialog.setMinimumDuration(0)
             backup_dialog.show()
             QApplication.processEvents()
+            # Backup-Thread erstellen und starten
+            self.backup_thread = BackupThread(camera, registry_paths)
+            backup_path = ""
+            backup_success = False
 
-            # Create backup before making changes
-            self.statusBar().showMessage("Creating backup...")
+            # Signals verbinden
+            def on_backup_completed(path):
+                nonlocal backup_path, backup_success
+                backup_path = path
+                backup_success = True
+                backup_dialog.setLabelText("Backup erfolgreich erstellt!")
+                QTimer.singleShot(500, backup_dialog.close)
 
+            def on_backup_failed(error_msg):
+                nonlocal backup_success
+                backup_success = False
+                backup_dialog.setLabelText(f"Backup-Fehler: {error_msg}")
+                QTimer.singleShot(1500, backup_dialog.close)
+
+            def on_backup_progress(status):
+                backup_dialog.setLabelText(status)
+                self.statusBar().showMessage(status)
+
+
+            self.backup_thread.backup_completed.connect(on_backup_completed)
+            self.backup_thread.backup_failed.connect(on_backup_failed)
+            self.backup_thread.progress_updated.connect(on_backup_progress)
+
+            # Thread starten und auf Completion warten
+            self.backup_thread.start()
+
+            # Event-Loop für Dialog während Backup läuft
+            while self.backup_thread.isRunning():
+                QApplication.processEvents()
+                self.backup_thread.msleep(20)
+
+            # Warten bis Thread beendet ist
+            self.backup_thread.wait()
+            # Final event processing to ensure signal is handled
             QApplication.processEvents()
-            backup_path = self.create_registry_backup(camera, registry_paths)
-
-            # Fortschritt ändern und Auto-Close einleiten
-            backup_dialog.setLabelText("Backup abgeschlossen")
-            QTimer.singleShot(800, backup_dialog.close)  # Schließt sich nach 0.8s automatisch
-
+            print(backup_path)
             success_count = 0
             total_paths = len(registry_paths)
 
@@ -2008,6 +2228,7 @@ class CamRenamerMainWindow(QMainWindow):
 
                     except Exception:
                         continue
+
 
             # Show backup information if successful
             if success_count > 0 and backup_path:
