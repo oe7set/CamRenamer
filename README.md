@@ -2,6 +2,8 @@
 
 A Windows application for renaming USB cameras in the Registry for better identification in streaming software like OBS.
 
+[Download CamRenamer](https://github.com/oe7set/CamRenamer/releases/download/v1.1.1/CamRenamer-windows-x64.zip)
+
 ## 📋 Overview
 
 CamRenamer allows you to easily rename USB cameras by changing their names directly in the Windows Registry. This is particularly useful for:
@@ -23,22 +25,9 @@ CamRenamer allows you to easily rename USB cameras by changing their names direc
 ## 📸 Screenshots
 
 ### Main Window
-```
-┌─────────────────────────────────────────────────────────────┐
-│ 🎥 USB Camera Manager                      🔄 Scan Cameras │
-├─────────────────────────────────────────────────────────────┤
-│ 📋 Found USB Cameras                                        │
-│ ┌─────────────────────────────────────────────────────────┐ │
-│ │ 🎥 Name    │ 🔧 Device ID │ 💾 HW ID  │ 🔌 Status     │ │
-│ │ USB Camera │ USB\VID_1234 │ USB\...   │ 🟢 Connected   │ │
-│ └─────────────────────────────────────────────────────────┘ │
-│                                                             │
-│ ✏️ Rename Camera                                            │
-│ ┌─────────────────────────────────────────────────────────┐ │
-│ │ 📝 New Name: [Streaming Camera Left     ] ✅ Rename    │ │
-│ └─────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
-```
+
+![Screenshot](doc/screen01.PNG)
+
 
 ## 🚀 Installation
 
@@ -240,6 +229,7 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 
 - 🐛 **Bug Reports**: [GitHub Issues](https://github.com/retroverse/camrenamer/issues)
 - 💡 **Feature Requests**: [GitHub Discussions](https://github.com/retroverse/camrenamer/discussions)
+
 [!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/oe7set)
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/O5O31L3XGA)
 
@@ -282,4 +272,4 @@ This project is licensed under the MIT License. See [LICENSE](LICENSE) for detai
 
 **Developed with ❤️ by [Erwin Spitaler OE7SET](https://github.com/oe7set)**
 
-pyinstaller --onefile --windowed --icon=src\img\icon.ico src\main.py
+
