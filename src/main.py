@@ -131,7 +131,7 @@ class EnhancedRegistrySearchThread(QThread):
     def load_default_search_options(self):
         """Load search options from settings or return defaults"""
         defaults = {
-            "device_manager_friendly_name": True,
+            "device_manager_friendly_name": False,
             "standard_device_paths": True,
             "device_classes": False,
             "usb_interfaces": False,
@@ -1094,8 +1094,9 @@ class BackupThread(QThread):
             self.backup_failed.emit(f"Backup-Error: {str(e)}")
 
     def create_backup_folder(self):
-        """Creates the backup folder if it doesn't exist"""
-        backup_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "CamRenamer_Backups")
+        """Erstellt den Backup-Ordner im Benutzer-Documents-Verzeichnis"""
+        documents_folder = os.path.join(os.path.expanduser("~"), "Documents")
+        backup_folder = os.path.join(documents_folder, "CamRenamer_Backups")
         os.makedirs(backup_folder, exist_ok=True)
         return backup_folder
 
